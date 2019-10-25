@@ -1,3 +1,31 @@
+# Borrowed from devtools: https://github.com/hadley/devtools/blob/ba7a5a4abd8258c52cb156e7b26bb4bf47a79f0b/R/utils.r#L44
+is_installed <- function (pkg, version = 0) {
+  installed_version <- tryCatch(utils::packageVersion(pkg), 
+                                error = function(e) NA)
+  !is.na(installed_version) && installed_version >= version
+}
+
+# Borrowed and adapted from devtools: https://github.com/hadley/devtools/blob/ba7a5a4abd8258c52cb156e7b26bb4bf47a79f0b/R/utils.r#L74
+ensure_installed <- function(pkg) {
+  if (!is_installed(pkg)) {
+    msg <- paste0(sQuote(pkg), " must be installed for this functionality.")
+    if (interactive()) {
+      message(msg, "\nWould you like to install it?")
+      if (utils::menu(c("Yes", "No")) == 1) {
+        if(pkg%in%c('BigKnn')){
+          devtools::install_github(paste0('OHDSI/',pkg))
+        }else{
+          utils::install.packages(pkg)
+        }
+      } else {
+        stop(msg, call. = FALSE)
+      }
+    } else {
+      stop(msg, call. = FALSE)
+    }
+  }
+}
+
 #' Check PatientLevelPrediction and its dependencies are correctly installed
 #'
 #' @details
@@ -16,9 +44,9 @@ checkPlpInstallation <- function(connectionDetails=NULL, python=T) {
     writeLines("Checking database connectivity")
     conn <- tryCatch({DatabaseConnector::connect(connectionDetails)},
                      error = function(e) {
-                       return(0)
+                       return(NULL)
                      })
-    if(length(conn)==1)
+    if(length(conn)==0)
       outCode <- outCode*3
     
     discon <- tryCatch({DatabaseConnector::disconnect(conn)},
@@ -67,7 +95,12 @@ checkPlpInstallation <- function(connectionDetails=NULL, python=T) {
                      })
   if(!is.null(modset)){
     model <- tryCatch({PatientLevelPrediction::runPlp(population, plpData, modelSettings = modset,
-                                                      testFraction = 0.5)},
+                                                      testFraction = 0.5, nfold = 3, 
+                                                      minCovariateFraction = 0, 
+                                                      saveEvaluation = F, 
+                                                      savePlpData = F, 
+                                                      savePlpResult = F, 
+                                                      savePlpPlots = F)},
                       error = function(e) {
                         return(NULL)
                       })} else {
@@ -85,7 +118,12 @@ checkPlpInstallation <- function(connectionDetails=NULL, python=T) {
                        })
     if(!is.null(modset)){
       model <- tryCatch({PatientLevelPrediction::runPlp(population, plpData, modelSettings = modset,
-                                                        testFraction = 0.5)},
+                                                        testFraction = 0.5, nfold = 3, 
+                                                        minCovariateFraction = 0, 
+                                                        saveEvaluation = F, 
+                                                        savePlpData = F, 
+                                                        savePlpResult = F, 
+                                                        savePlpPlots = F)},
                         error = function(e) {
                           return(NULL)
                         })} else {
@@ -100,7 +138,12 @@ checkPlpInstallation <- function(connectionDetails=NULL, python=T) {
                        })
     if(!is.null(modset)){
       model <- tryCatch({PatientLevelPrediction::runPlp(population, plpData, modelSettings = modset,
-                                                        testFraction = 0.5)},
+                                                        testFraction = 0.5, nfold = 3, 
+                                                        minCovariateFraction = 0, 
+                                                        saveEvaluation = F, 
+                                                        savePlpData = F, 
+                                                        savePlpResult = F, 
+                                                        savePlpPlots = F)},
                         error = function(e) {
                           return(NULL)
                         })} else {
@@ -115,7 +158,12 @@ checkPlpInstallation <- function(connectionDetails=NULL, python=T) {
                        })
     if(!is.null(modset)){
       model <- tryCatch({PatientLevelPrediction::runPlp(population, plpData, modelSettings = modset,
-                                                        testFraction = 0.5)},
+                                                        testFraction = 0.5, nfold = 3, 
+                                                        minCovariateFraction = 0, 
+                                                        saveEvaluation = F, 
+                                                        savePlpData = F, 
+                                                        savePlpResult = F, 
+                                                        savePlpPlots = F)},
                         error = function(e) {
                           return(NULL)
                         })} else {
@@ -130,7 +178,12 @@ checkPlpInstallation <- function(connectionDetails=NULL, python=T) {
                        })
     if(!is.null(modset)){
       model <- tryCatch({PatientLevelPrediction::runPlp(population, plpData, modelSettings = modset,
-                                                        testFraction = 0.5)},
+                                                        testFraction = 0.5, nfold = 3, 
+                                                        minCovariateFraction = 0, 
+                                                        saveEvaluation = F, 
+                                                        savePlpData = F, 
+                                                        savePlpResult = F, 
+                                                        savePlpPlots = F)},
                         error = function(e) {
                           return(NULL)
                         })} else {
@@ -145,7 +198,12 @@ checkPlpInstallation <- function(connectionDetails=NULL, python=T) {
                        })
     if(!is.null(modset)){
       model <- tryCatch({PatientLevelPrediction::runPlp(population, plpData, modelSettings = modset,
-                                                        testFraction = 0.5)},
+                                                        testFraction = 0.5, nfold = 3, 
+                                                        minCovariateFraction = 0, 
+                                                        saveEvaluation = F, 
+                                                        savePlpData = F, 
+                                                        savePlpResult = F, 
+                                                        savePlpPlots = F)},
                         error = function(e) {
                           return(NULL)
                         })} else {
@@ -163,7 +221,12 @@ checkPlpInstallation <- function(connectionDetails=NULL, python=T) {
                      })
   if(!is.null(modset)){
     model <- tryCatch({PatientLevelPrediction::runPlp(population, plpData, modelSettings = modset,
-                                                      testFraction = 0.5)},
+                                                      testFraction = 0.5, nfold = 3, 
+                                                      minCovariateFraction = 0, 
+                                                      saveEvaluation = F, 
+                                                      savePlpData = F, 
+                                                      savePlpResult = F, 
+                                                      savePlpPlots = F)},
                       error = function(e) {
                         return(NULL)
                       })} else {
@@ -178,7 +241,12 @@ checkPlpInstallation <- function(connectionDetails=NULL, python=T) {
                      })
   if(!is.null(modset)){
     model <- tryCatch({PatientLevelPrediction::runPlp(population, plpData, modelSettings = modset,
-                                                      testFraction = 0.5)},
+                                                      testFraction = 0.5, nfold = 3, 
+                                                      minCovariateFraction = 0, 
+                                                      saveEvaluation = F, 
+                                                      savePlpData = F, 
+                                                      savePlpResult = F, 
+                                                      savePlpPlots = F)},
                       error = function(e) {
                         return(NULL)
                       })} else {
@@ -197,6 +265,7 @@ checkPlpInstallation <- function(connectionDetails=NULL, python=T) {
   
   writeLines("\nPatientLevelPrediction installation check completed...")
   writeLines(paste0("\nResponse code: ", outCode))
+  interpretInstallCode(outCode)
 }
 
 
@@ -240,5 +309,152 @@ interpretInstallCode <- function(response){
   }
     return(NULL)
 }
+
+
+clearLoggerType <- function(type='PLP log'){
+  logs <- ParallelLogger::getLoggers()
+  logNames <- unlist(lapply(logs, function(x) x$name))
+  ind <- which(logNames==type)
   
+  for(i in ind){
+    ParallelLogger::unregisterLogger(logNames[i])
+  }
+  
+  return(NULL)
+}
+
+createTempModelLoc <- function(){
+  repeat{
+    loc <- file.path(tempdir(), paste0('python_models_',sample(10002323,1)))
+    if(!dir.exists(loc)){
+      return(loc)
+    }
+  }
+}
+
+#' join two lists
+#'
+#' @details
+#' This function joins two lists
+#' @param a   A list 
+#' @param b   Another list
+#'
+#' @export
+listAppend <- function(a, b){
+  size <- length(a) + length(b)
+  x <- list()
+  length(x) <- size
+  for(i in 1:size){
+    if(i<=length(a)){
+      x[[i]] <- a[[i]]
+    } else{
+      x[[i]] <- b[[i-length(a)]]
+    }
+  }
+  names(x) <- c(names(a), names(b))
+  return(x)
+}
+
+
+#' Sets up a virtual environment to use for PLP (can be conda or python) 
+#'
+#' @details
+#' This function creates a virtual environment that can be used by PatientLevelPrediction
+#' and installs all the required package dependancies.  If using python, pip must be set up.
+#'
+#' @param envname   A string for the name of the virtual environment (default is 'PLP') 
+#' @param envtype   An option for specifying the environment as'conda' or 'python'.  If NULL then the default is 'conda' for windows users and 'python' for non-windows users 
+#'
+#' @export
+configurePython <- function(envname='PLP', envtype=NULL){
+  
+  if(is.null(envtype)){
+    if(getOs()=='windows'){
+      envtype=='conda'
+    } else {
+      envtype=='python'
+    }
+  }
+  
+  if(envtype=='conda'){
+    pEnvironments <- reticulate::conda_list()
+    if(envname%in%pEnvironments$name){
+      warning(paste0('Conda environment ', envname,' exists.  You can use removePython() to remove if you want to fresh config'))
+    } else {
+      ParallelLogger::logInfo(paste0('Creating virtual conda environment called ', envname))
+      location <- reticulate::conda_create(envname=envname, packages = "python", conda = "auto")
+    }
+    packages <- c('numpy','scipy','scikit-learn', 'pandas','pydotplus','keras')
+    ParallelLogger::logInfo(paste0('Adding python dependancies to ', envname))
+    reticulate::conda_install(envname=envname, packages = packages, forge = TRUE, pip = FALSE,
+                              pip_ignore_installed = TRUE, conda = "auto")
+  } else {
+    pEnvironments <- reticulate::virtualenv_list()
+    if(envname%in%pEnvironments$name){
+      warning(paste0('Python environment ', envname,' exists.  You can use removePython() to remove if you want to fresh config'))
+    } else {
+      ParallelLogger::logInfo(paste0('Creating virtual python environment called ', envname))
+      location <- reticulate::virtualenv_create(envname=envname, packages = "python")
+    }
+    packages <- c('numpy', 'scikit-learn','scipy', 'pandas','pydotplus','keras')
+    ParallelLogger::logInfo(paste0('Adding python dependancies to ', envname))
+    reticulate::virtualenv_install(envname=envname, packages = packages, forge = TRUE, pip = TRUE,
+                              pip_ignore_installed = TRUE)
+  }
+  
+  return(location)
+}
+
+#' Use the virtual environment created using configurePython()
+#'
+#' @details
+#' This function sets PatientLevelPrediction to use a virtual environment 
+#'
+#' @param envname   A string for the name of the virtual environment (default is 'PLP') 
+#' @param envtype   An option for specifying the environment as'conda' or 'python'.  If NULL then the default is 'conda' for windows users and 'python' for non-windows users 
+#'
+#' @export
+setPythonEnvironment <- function(envname='PLP', envtype=NULL){
+  
+  if(is.null(envtype)){
+    if(getOs()=='windows'){
+      envtype=='conda'
+    } else {
+      envtype=='python'
+    }
+  }
+  
+  if(envtype=='conda'){
+    pEnvironments <- reticulate::conda_list()
+    if(!envname%in%pEnvironments$name){
+      return(paste0('Conda environment ', envname,' not found.  Please set up using configurePython()'))
+    }
+    reticulate::use_condaenv(envname)
+    return(paste0('Using conda environment ',envname))
+  } else {
+    pEnvironments <- reticulate::virtualenv_list()
+    if(!envname%in%pEnvironments$name){
+      return(paste0('Python environment ', envname,' not found.  Please set up using configurePython()'))
+    }
+    reticulate::use_virtualenv(envname)
+    return(paste0('Using python environment ',envname))
+  }
+  
+}
+
+getOs <- function(){
+  sysinf <- Sys.info()
+  if (!is.null(sysinf)){
+    os <- sysinf['sysname']
+    if (os == 'Darwin')
+      os <- "osx"
+  } else { ## mystery machine
+    os <- .Platform$OS.type
+    if (grepl("^darwin", R.version$os))
+      os <- "osx"
+    if (grepl("linux-gnu", R.version$os))
+      os <- "linux"
+  }
+  tolower(os)
+}
 

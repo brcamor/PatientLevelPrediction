@@ -1,6 +1,6 @@
 # @file RunPlp.R
 #
-# Copyright 2018 Observational Health Data Sciences and Informatics
+# Copyright 2019 Observational Health Data Sciences and Informatics
 #
 # This file is part of PatientLevelPrediction
 #
@@ -35,13 +35,20 @@
 #' @param plpData                          An object of type \code{plpData} - the patient level prediction
 #'                                         data extracted from the CDM.
 #' @param minCovariateFraction             The minimum fraction of target population who must have a covariate for it to be included in the model training                            
+#' @param normalizeData                    Whether to normalise the covariates before training (Default: TRUE)      
 #' @param modelSettings                    An object of class \code{modelSettings} created using one of the function:
 #'                                         \itemize{
-#'                                         \item{logisticRegressionModel()}{ A lasso logistic regression model}
-#'                                         \item{GBMclassifier()}{ A gradient boosting machine}
-#'                                         \item{RFclassifier()}{ A random forest model}
-#'                                         \item{GLMclassifier ()}{ A generalised linear model}
-#'                                         \item{KNNclassifier()}{ A KNN model}
+#'                                         \item{setLassoLogisticRegression()}{ A lasso logistic regression model}
+#'                                         \item{setGradientBoostingMachine()}{ A gradient boosting machine}
+#'                                         \item{setAdaBoost()}{ An ada boost model}
+#'                                         \item{setRandomForest()}{ A random forest model}
+#'                                         \item{setDecisionTree()}{ A decision tree model}
+#'                                         \item{setCovNN())}{ A convolutional neural network model}
+#'                                         \item{setCIReNN()}{ A recurrent neural network model}
+#'                                         \item{setMLP()}{ A neural network model}
+#'                                         \item{setDeepNN()}{ A deep neural network model}
+#'                                         \item{setKNN()}{ A KNN model}
+#'                                         
 #'                                         }
 #' @param testSplit                        Either 'person' or 'time' specifying the type of evaluation used.
 #'                                         'time' find the date where testFraction of patients had an index after the date and assigns patients with an index prior to this date into the training set and post the date into the test set
@@ -49,11 +56,16 @@
 #'                                         train (validationFraction of the data) sets.  The split is stratified by the class label.
 #' @param testFraction                     The fraction of the data to be used as the test set in the patient
 #'                                         split evaluation.
+#' @param trainFraction                    A real number between 0 and 1 indicating the train set fraction of the data.
+#'                                         If not set trainFraction is equal to 1 - test
 #' @param splitSeed                        The seed used to split the test/train set when using a person type testSplit                  
 #' @param nfold                            The number of folds used in the cross validation (default 3)
 #' @param indexes                          A dataframe containing a rowId and index column where the index value of -1 means in the test set, and positive integer represents the cross validation fold (default is NULL)
-#' @param save                             The path to the directory where the models will be saved (if NULL uses working directory)
-#' @param saveModel                        Binary indicating whether to save the model once it is trained (default is T)
+#' @param saveDirectory                    The path to the directory where the results will be saved (if NULL uses working directory)
+#' @param savePlpData                      Binary indicating whether to save the plpData object (default is T)
+#' @param savePlpResult                    Binary indicating whether to save the object returned by runPlp (default is T)
+#' @param savePlpPlots                     Binary indicating whether to save the performance plots as pdf files (default is T)
+#' @param saveEvaluation                   Binary indicating whether to save the oerformance as csv files (default is T)
 #' @param verbosity                        Sets the level of the verbosity. If the log level is at or higher in priority than the logger threshold, a message will print. The levels are:
 #'                                         \itemize{
 #'                                         \item{DEBUG}{Highest verbosity showing all debug statements}
@@ -65,7 +77,7 @@
 #'                                         }
 #' @param timeStamp                        If TRUE a timestamp will be added to each logging statement. Automatically switched on for TRACE level.
 #' @param analysisId                       Identifier for the analysis. It is used to create, e.g., the result folder. Default is a timestamp.
-#'
+#' @param save                             Old input - please now use saveDirectory
 #' @return
 #' An object containing the model or location where the model is save, the data selection settings, the preprocessing
 #' and training settings as well as various performance measures obtained by the model.
@@ -112,7 +124,7 @@
 #'                         modelSettings = model.lr ,
 #'                         testSplit = 'time', testFraction=0.3, 
 #'                         nfold=3, indexes=NULL,
-#'                         save=file.path('C:','User','home'),
+#'                         saveDirectory =file.path('C:','User','myPredictionName'),
 #'                         verbosity='INFO')
 #'  
 #' #******** EXAMPLE 2 *********                                               
@@ -126,182 +138,209 @@
 #'                         modelSettings = model.gbm,
 #'                         testSplit = 'time', testFraction=0.3, 
 #'                         nfold=3, indexes=mod.lr$indexes,
-#'                         save=file.path('C:','User','home'))
+#'                         saveDirectory =file.path('C:','User','myPredictionName2'))
 #' } 
-runPlp <- function(population, plpData,  minCovariateFraction = 0.001,
+runPlp <- function(population, plpData,  minCovariateFraction = 0.001, normalizeData=T,
                    modelSettings,
-                   testSplit = 'time', testFraction=0.25, splitSeed=NULL, nfold=3, indexes=NULL,
-                   save=NULL, saveModel=T,
-                   verbosity=futile.logger::INFO, timeStamp=FALSE, analysisId=NULL
+                   testSplit = 'time', testFraction=0.25, trainFraction = NULL, splitSeed=NULL, nfold=3, indexes=NULL,
+                   saveDirectory=NULL, savePlpData=T,
+                   savePlpResult=T, savePlpPlots = T, saveEvaluation = T,
+                   verbosity="INFO", timeStamp=FALSE, analysisId=NULL, 
+                   save=NULL
 ){
+  
+  if(!missing(save)){
+    warning('save has been replaced with saveDirectory - please use this input from now on')
+    if(is.null(saveDirectory)){saveDirectory <- save}
+  }
+  
+  if(missing(verbosity)){
+    verbosity <- "INFO"
+  } else{
+    if(!verbosity%in%c("DEBUG","TRACE","INFO","WARN","FATAL","ERROR", "NONE")){
+      stop('Incorrect verbosity string')
+    }
+  }
   
   # log the start time:
   ExecutionDateTime <- Sys.time()
-  
-  if (timeStamp | verbosity == TRACE){
-    flog.layout(layout.format('[~l]\t[~t]\t~m'))
-  } else {
-    flog.layout(layout.format('~m'))
-  }
-  flog.threshold(verbosity)
   
   # create an analysisid and folder to save the results
   start.all <- Sys.time()
   if(is.null(analysisId))
     analysisId <- gsub(':','',gsub('-','',gsub(' ','',start.all)))
   
-  if(is.null(save)) save <- file.path(getwd(),'plpmodels') #if NULL save to wd
+  if(is.null(saveDirectory)){
+    analysisPath <- file.path(getwd(),analysisId)
+  } else {
+    analysisPath <- file.path(saveDirectory,analysisId) 
+  }
   
-  # TODO: This will not work for example if libsvm conversion is needed and no Save is filled in.
-  
-  analysisPath = file.path(save,analysisId)
-  if(!dir.exists(analysisPath)){dir.create(analysisPath,recursive=T)}
+  if(verbosity!="NONE"){
+    if(!dir.exists(analysisPath)){dir.create(analysisPath,recursive=T)}
+  }
   logFileName = paste0(analysisPath,'/plplog.txt')
   
   # write log to both console and file (tee). 
   # note other appenders can be created, e.g., to webservice or database!
+  clearLoggerType("PLP Log")
+  if(verbosity!="NONE"){
+    logger <- ParallelLogger::createLogger(name = "PLP Log",
+                                           threshold = verbosity,
+                                           appenders = list(ParallelLogger::createFileAppender(layout = ParallelLogger::layoutParallel,
+                                                                                               fileName = logFileName)))
+    ParallelLogger::registerLogger(logger)
+  }
   
-  flog.appender(appender.tee(logFileName))
-  
-  flog.seperator()
-  flog.info(paste0('Patient-Level Prediction Package version ', utils::packageVersion("PatientLevelPrediction")))
+  ParallelLogger::logInfo(paste0('Patient-Level Prediction Package version ', utils::packageVersion("PatientLevelPrediction")))
   
   # get ids
   cohortId <- attr(population, "metaData")$cohortId
   outcomeId <- attr(population, "metaData")$outcomeId
   
   # add header to analysis log
-  flog.seperator()
-  flog.info(sprintf('%-20s%s', 'AnalysisID: ',analysisId))
-  flog.info(sprintf('%-20s%s', 'CohortID: ', cohortId))
-  flog.info(sprintf('%-20s%s', 'OutcomeID: ', outcomeId))
-  flog.info(sprintf('%-20s%s', 'Cohort size: ', nrow(plpData$cohorts)))
-  flog.info(sprintf('%-20s%s', 'Covariates: ', nrow(plpData$covariateRef)))
-  flog.info(sprintf('%-20s%s', 'Population size: ', nrow(population)))
-  flog.info(sprintf('%-20s%s', 'Cases: ', sum(population$outcomeCount>0)))
-  flog.seperator()
+  ParallelLogger::logInfo(sprintf('%-20s%s', 'AnalysisID: ',analysisId))
+  ParallelLogger::logInfo(sprintf('%-20s%s', 'CohortID: ', cohortId))
+  ParallelLogger::logInfo(sprintf('%-20s%s', 'OutcomeID: ', outcomeId))
+  ParallelLogger::logInfo(sprintf('%-20s%s', 'Cohort size: ', nrow(plpData$cohorts)))
+  ParallelLogger::logInfo(sprintf('%-20s%s', 'Covariates: ', nrow(plpData$covariateRef)))
+  ParallelLogger::logInfo(sprintf('%-20s%s', 'Population size: ', nrow(population)))
+  ParallelLogger::logInfo(sprintf('%-20s%s', 'Cases: ', sum(population$outcomeCount>0)))
   
   # check parameters
-  flog.trace('Parameter Check Started')
+  ParallelLogger::logTrace('Parameter Check Started')
+  ParallelLogger::logDebug(paste0('testSplit: ', testSplit))
   checkInStringVector(testSplit, c('person','time'))
+  ParallelLogger::logDebug(paste0('outcomeCount: ', sum(population[,'outcomeCount']>0)))
   checkHigherEqual(sum(population[,'outcomeCount']>0), 25)
+  ParallelLogger::logDebug(paste0('plpData class: ', class(plpData)))
   checkIsClass(plpData, c('plpData'))
-  checkIsClass(testFraction, 'numeric')
+  ParallelLogger::logDebug(paste0('testfraction: ', testFraction))
+  checkIsClass(testFraction, c('numeric','integer'))
   checkHigher(testFraction,0)
   checkHigher(-1*testFraction,-1)
-  checkIsClass(nfold, 'numeric')
+  ParallelLogger::logDebug(paste0('nfold class: ', class(nfold)))
+  ParallelLogger::logDebug(paste0('nfold: ', nfold))
+  checkIsClass(nfold, c('numeric','integer'))
   checkHigher(nfold, 0)
   
-
+  # if savePlpData
+  if(savePlpData){
+    ParallelLogger::logInfo(sprintf('%-20s%s', 'Saving plpData to ', file.path(analysisPath,'plpData')))
+    savePlpData(plpData, file.path(analysisPath,'plpData'))
+  }
+  
   # construct the settings for the model pipeline
   if(is.null(indexes)){
     if(testSplit=='time'){
-      flog.trace('Dataset time split starter')
-      indexes <-ftry(timeSplitter(population, test=testFraction, nfold=nfold),
-                     finally=flog.trace('Done.'))
+      ParallelLogger::logTrace('Dataset time split starter')
+      indexes <-tryCatch(timeSplitter(population, test=testFraction, train = trainFraction, nfold=nfold),
+                         finally=ParallelLogger::logTrace('Done.'))
     }
     if(testSplit=='person'){
-      flog.trace('Dataset person split starter')
-      if(is.null(splitSeed)){ splitSeed <- sample(20000000,1)-10000000} #keep record of splitSeed
-      indexes <- ftry(personSplitter(population, test=testFraction, nfold=nfold, seed=splitSeed),
-                      finally= flog.trace('Done.')
+      ParallelLogger::logTrace('Dataset person split starter')
+      if(is.null(splitSeed)){ #keep record of splitSeed
+        splitSeed <- sample(20000000,1)-10000000
+        ParallelLogger::logInfo(paste0('splitSeed: ', splitSeed))
+      } 
+      indexes <- tryCatch(personSplitter(population, test=testFraction, train = trainFraction, nfold=nfold, seed=splitSeed),
+                          finally= ParallelLogger::logTrace('Done.')
       )
     }
   }
   
-  # TODO better to move this to the splitter if this is important?
   if(nrow(population)!=nrow(indexes)){
-    flog.error(sprintf('Population dimension not compatible with indexes: %d <-> %d', nrow(population), nrow(indexes)))
+    ParallelLogger::logError(sprintf('Population dimension not compatible with indexes: %d <-> %d', nrow(population), nrow(indexes)))
     stop('Population dimension not compatible with indexes')
   }
   
   # train the model
-  flog.seperator()
   tempmeta <- attr(population, "metaData")
-  population <- merge(population, indexes)
+  population <- merge(population, indexes, by = 'rowId')
   colnames(population)[colnames(population)=='index'] <- 'indexes'
   attr(population, "metaData") <- tempmeta
   
   settings <- list(data=plpData, minCovariateFraction=minCovariateFraction,
+                   normalizeData = normalizeData,
                    modelSettings = modelSettings,
                    population=population,
                    cohortId=cohortId,
                    outcomeId=outcomeId)
   
-  flog.info(sprintf('Training %s model',settings$modelSettings$name))  
+  ParallelLogger::logInfo(sprintf('Training %s model',settings$modelSettings$name))  
   # the call is sinked because of the external calls (Python etc)
   if (sink.number()>0){
-    flog.warn(paste0('sink had ',sink.number(),' connections open!'))
+    ParallelLogger::logWarn(paste0('sink had ',sink.number(),' connections open!'))
   }
-  sink(logFileName, append = TRUE, split = TRUE)
+  #sink(logFileName, append = TRUE, split = TRUE)
   
-  model <- ftry(do.call(fitPlp, settings),
-                error = function(e) {sink()
-                  flog.error(e)
-                  stop(e)},
-                finally = {
-                  flog.trace('Done.')})
-  sink()
+  model <- tryCatch(do.call(fitPlp, settings),
+                    error = function(e) {
+                      stop(paste0(e))},
+                    finally = {
+                      ParallelLogger::logTrace('Done.')})
+  model$analysisId <- analysisId # adding this so we can link validation to models
   
-  # save the model
-  if(saveModel==T){
-    modelLoc <- file.path(save,analysisId, 'savedModel' )
-    ftry(savePlpModel(model, modelLoc),finally= flog.trace('Done.'))
-    flog.info(paste0('Model saved to ..\\',analysisId,'\\savedModel'))
-    
-    #update the python saved location
-    if(attr(model, 'type')=='python'){
-      model$model <- file.path(modelLoc,'python_model')
-      model$predict <- createTransform(model)
-    }
-  }
+  # get train prediction and remove it from model
+  predictionTrain <- model$predictionTrain
+  model$predictionTrain <- NULL
   
+  # create test subset of population
+  populationTest <- population[population$indexes<0,]
+  attr(populationTest, 'metaData') <- attr(population, 'metaData')
   # calculate metrics
-  flog.seperator()
-  flog.trace('Prediction')
-  prediction <- ftry(predictPlp(plpModel = model, population = population, plpData = plpData, index = NULL), 
-                     finally = flog.trace('Done.'))
+  ParallelLogger::logTrace('Prediction')
+  predictionTest <- tryCatch(predictPlp(plpModel = model, 
+                                        population = populationTest, #population, 
+                                        plpData = plpData, 
+                                        index = NULL), 
+                             finally = ParallelLogger::logTrace('Done.'))
+  
+  prediction <- rbind(predictionTest, predictionTrain[,colnames(predictionTest)])
+  
+  ParallelLogger::logDebug(paste0('prediction null: ', is.null(prediction)))
+  ParallelLogger::logDebug(paste0('prediction unique values: ', length(unique(prediction$value))))
   if(ifelse(is.null(prediction), FALSE, length(unique(prediction$value))>1)){
     
     # add analysisID
     attr(prediction, "metaData")$analysisId <- analysisId
     
-    flog.info('Train set evaluation')
+    ParallelLogger::logInfo('Train set evaluation')
     performance.train <- evaluatePlp(prediction[prediction$indexes>0,], plpData)
-    flog.trace('Done.')
-    flog.info('Test set evaluation')
+    ParallelLogger::logTrace('Done.')
+    ParallelLogger::logInfo('Test set evaluation')
     performance.test <- evaluatePlp(prediction[prediction$indexes<0,], plpData)
-    flog.trace('Done.')
+    ParallelLogger::logTrace('Done.')
     
     # now combine the test and train data and add analysisId
     performance <- reformatPerformance(train=performance.train, test=performance.test, analysisId)
     
-    if(!is.null(save)){
-      flog.trace('Saving evaluation')
+    if(saveEvaluation){
+      ParallelLogger::logTrace('Saving evaluation csv files')
       if(!dir.exists( file.path(analysisPath, 'evaluation') ))
         dir.create(file.path(analysisPath, 'evaluation'))
-      ftry(utils::write.csv(performance$evaluationStatistics, file.path(analysisPath, 'evaluation', 'evaluationStatistics.csv'), row.names=F ),
-           finally= flog.trace('Saved EvaluationStatistics.')
+      tryCatch(utils::write.csv(performance$evaluationStatistics, file.path(analysisPath, 'evaluation', 'evaluationStatistics.csv'), row.names=F ),
+               finally= ParallelLogger::logTrace('Saved EvaluationStatistics.')
       )
-      ftry(utils::write.csv(performance$thresholdSummary, file.path(analysisPath, 'evaluation', 'thresholdSummary.csv'), row.names=F ),
-           finally= flog.trace('Saved ThresholdSummary.')
+      tryCatch(utils::write.csv(performance$thresholdSummary, file.path(analysisPath, 'evaluation', 'thresholdSummary.csv'), row.names=F ),
+               finally= ParallelLogger::logTrace('Saved ThresholdSummary.')
       )
-      ftry(utils::write.csv(performance$demographicSummary, file.path(analysisPath, 'evaluation', 'demographicSummary.csv'), row.names=F),
-           finally= flog.trace('Saved DemographicSummary.')
+      tryCatch(utils::write.csv(performance$demographicSummary, file.path(analysisPath, 'evaluation', 'demographicSummary.csv'), row.names=F),
+               finally= ParallelLogger::logTrace('Saved DemographicSummary.')
       )
-      ftry(utils::write.csv(performance$calibrationSummary, file.path(analysisPath, 'evaluation', 'calibrationSummary.csv'), row.names=F),
-           finally= flog.trace('Saved CalibrationSummary.')
+      tryCatch(utils::write.csv(performance$calibrationSummary, file.path(analysisPath, 'evaluation', 'calibrationSummary.csv'), row.names=F),
+               finally= ParallelLogger::logTrace('Saved CalibrationSummary.')
       )
-      ftry(utils::write.csv(performance$predictionDistribution, file.path(analysisPath, 'evaluation', 'predictionDistribution.csv'), row.names=F),
-           finally= flog.trace('Saved PredictionDistribution.')
+      tryCatch(utils::write.csv(performance$predictionDistribution, file.path(analysisPath, 'evaluation', 'predictionDistribution.csv'), row.names=F),
+               finally= ParallelLogger::logTrace('Saved PredictionDistribution.')
       )
     }
-    flog.seperator()
     
   }else{
-    flog.warn(paste0('Evaluation not possible as prediciton NULL or all the same values'))
+    ParallelLogger::logWarn(paste0('Evaluation not possible as prediciton NULL or all the same values'))
     performance.test <- NULL
     performance.train <- NULL
+    performance <- NULL
   }
   
   # log the end time:
@@ -330,11 +369,14 @@ runPlp <- function(population, plpData,  minCovariateFraction = 0.001,
                            #Not available at the moment: CDM_SOURCE -  meta-data containing CDM version, release date, vocabulary version
   )
   
-  flog.seperator()
-  flog.info(paste0('Calculating covariate summary @ ', Sys.time()))
-  flog.info('This can take a while...')
+  ParallelLogger::logInfo(paste0('Calculating covariate summary @ ', Sys.time()))
+  ParallelLogger::logInfo('This can take a while...')
   covSummary <- covariateSummary(plpData, population)
-  covSummary <- merge(model$varImp[,colnames(model$varImp)!='covariateName'], covSummary, by='covariateId', all=T)
+  if(exists("model")){
+    if(!is.null(model$varImp)){
+      covSummary <- merge(model$varImp[,colnames(model$varImp)!='covariateName'], covSummary, by='covariateId', all=T)
+    }
+  }
   trainCovariateSummary <- covariateSummary(plpData, population[population$index>0,])
   trainCovariateSummary <- trainCovariateSummary[,colnames(trainCovariateSummary)!='covariateName']
   colnames(trainCovariateSummary)[colnames(trainCovariateSummary)!='covariateId'] <- paste0('Train',colnames(trainCovariateSummary)[colnames(trainCovariateSummary)!='covariateId'])
@@ -343,14 +385,22 @@ runPlp <- function(population, plpData,  minCovariateFraction = 0.001,
   colnames(testCovariateSummary)[colnames(testCovariateSummary)!='covariateId'] <- paste0('Test',colnames(testCovariateSummary)[colnames(testCovariateSummary)!='covariateId'])
   covSummary <- merge(covSummary,trainCovariateSummary, by='covariateId', all=T)
   covSummary <- merge(covSummary,testCovariateSummary, by='covariateId', all=T)
-  if(!is.null(save)){
-    flog.trace('Saving covariate summary')
+  
+  # make covariateValue 0 if NA
+  if('covariateValue'%in%colnames(covSummary)){
+    covSummary$covariateValue[is.na(covSummary$covariateValue)] <- 0
+  }
+  
+  
+  if(saveEvaluation){
+    ParallelLogger::logTrace('Saving covariate summary as csv')
     if(!dir.exists( file.path(analysisPath, 'evaluation') ))
       dir.create(file.path(analysisPath, 'evaluation'))
-    ftry(utils::write.csv(covSummary, file.path(analysisPath, 'evaluation', 'covariateSummary.csv'), row.names=F ),
-         finally= flog.trace('Saved covariate summary.')
-    )}
-  flog.info(paste0('Finished covariate summary @ ', Sys.time()))
+    tryCatch(utils::write.csv(covSummary, file.path(analysisPath, 'evaluation', 'covariateSummary.csv'), row.names=F ),
+             finally= ParallelLogger::logTrace('Saved covariate summary.')
+    )
+  }
+  ParallelLogger::logInfo(paste0('Finished covariate summary @ ', Sys.time()))
   
   results <- list(inputSetting=inputSetting,
                   executionSummary=executionSummary,
@@ -363,8 +413,35 @@ runPlp <- function(population, plpData,  minCovariateFraction = 0.001,
                                    analysisSettings= NULL))
   class(results) <- c('runPlp')
   
-  flog.info(paste0('Log saved to ',logFileName))  
-  flog.info("Run finished successfully.")
+  # save the plots?
+  if(savePlpPlots & !is.null(performance)){
+    plotPlp(result = results, filename = file.path(analysisPath))
+  }
+  
+  # save the results
+  if(savePlpResult){
+    ParallelLogger::logInfo(paste0('Saving PlpResult'))
+    tryCatch(savePlpResult(results, file.path(analysisPath,'plpResult')),
+             finally= ParallelLogger::logTrace('Done.'))
+    ParallelLogger::logInfo(paste0('plpResult saved to ..\\', analysisPath ,'\\plpResult'))
+    
+    # update from temp location to saved location
+    results$model <- updateModelLocation(results$model, file.path(analysisPath,'plpResult'))
+  }
+  
+  
+  if(verbosity!="NONE"){
+    ParallelLogger::logInfo(paste0('Log saved to ',logFileName))  
+  }
+  ParallelLogger::logInfo("Run finished successfully.")
+  
+  # stop logger
+  ParallelLogger::clearLoggers()
+  logger <- ParallelLogger::createLogger(name = "SIMPLE",
+                                         threshold = "INFO",
+                                         appenders = list(ParallelLogger::createConsoleAppender(layout = ParallelLogger::layoutTimestamp)))
+  ParallelLogger::registerLogger(logger)
+  
   return(results)
   
 }
@@ -386,11 +463,11 @@ summary.plpModel <- function(object, ...) {
   }
   
   writeLines(paste0("The study was started at: ", object$executionSummary$ExecutionDateTime, 
-                   " and took at total of ", as.double(object$executionSummary$TotalExecutionElapsedTime, unit='mins'),
-                   " minutes.  ", hyper))
+                    " and took at total of ", as.double(object$executionSummary$TotalExecutionElapsedTime, unit='mins'),
+                    " minutes.  ", hyper))
   
   aucInd <- object$performanceEvaluation$evaluationStatistics[,'Eval']=='test' & 
-            object$performanceEvaluation$evaluationStatistics[,'Metric']%in%c('auc','AUC.auc')
+    object$performanceEvaluation$evaluationStatistics[,'Metric']%in%c('auc','AUC.auc')
   
   brierScoreInd <- object$performanceEvaluation$evaluationStatistics[,'Eval']=='test' & 
     object$performanceEvaluation$evaluationStatistics[,'Metric']%in%c('BrierScore')

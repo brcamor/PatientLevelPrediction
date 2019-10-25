@@ -1,6 +1,6 @@
 # @file knn.R
 #
-# Copyright 2018 Observational Health Data Sciences and Informatics
+# Copyright 2019 Observational Health Data Sciences and Informatics
 #
 # This file is part of PatientLevelPrediction
 #
@@ -27,10 +27,10 @@
 #' }
 #' @export
 setKNN <- function(k=1000, indexFolder=file.path(getwd(),'knn')  ){
-  
+  ensure_installed("BigKnn")
   if(class(indexFolder)!='character')
     stop('IndexFolder must be a character')
-  if(class(k)!='numeric')
+  if(!class(k) %in% c("numeric", "integer"))
     stop('k must be a numeric value >0 ')
   if(k<1)
     stop('k must be a numeric value >0 ')
@@ -65,13 +65,6 @@ fitKNN <- function(plpData,population, param, quiet=T, cohortId, outcomeId, ...)
   covariates <- ff::clone(plpData$covariates)
   covariates <- limitCovariatesToPopulation(covariates, ff::as.ff(population$rowId))
   
-  # format of knn
-  #outcomes$y <- ff::as.ff(rep(1, length(unique(ff::as.ram(outcomes$rowId)))))
-  # add 0 outcome:
-  #ppl <- cohorts$rowId
-  #new <- ppl[!ppl%in%unique(outcomes$rowId)]
-  #newOut <- data.frame(rowId=new, outcomeId=-1,outcomeCount=1,timeToEvent=0,y=0)
-  #outcomes <- as.ffdf(rbind(plpData$outcomes,newOut))
   population$y <- population$outcomeCount
   population$y[population$y>0] <- 1
   
@@ -87,6 +80,14 @@ fitKNN <- function(plpData,population, param, quiet=T, cohortId, outcomeId, ...)
   varImp<- ff::as.ram(plpData$covariateRef)
   varImp$covariateValue <- rep(0, nrow(varImp))
   
+  prediction <- predict.knn(plpData=plpData, 
+                            population = population, 
+                            plpModel=list(model=indexFolder,
+                                          modelSettings = list(model='knn',
+                                                               modelParameters=list(k=k),
+                                                               indexFolder=indexFolder
+                                          )))
+  
   result <- list(model = indexFolder,
                  trainCVAuc = NULL,    # did I actually save this!?
                  modelSettings = list(model='knn',
@@ -99,7 +100,8 @@ fitKNN <- function(plpData,population, param, quiet=T, cohortId, outcomeId, ...)
                  outcomeId=outcomeId,
                  cohortId=cohortId,
                  varImp = varImp,
-                 trainingTime =comp
+                 trainingTime =comp,
+                 predictionTrain = prediction
   )
   class(result) <- 'plpModel'
   attr(result, 'type') <- 'knn'

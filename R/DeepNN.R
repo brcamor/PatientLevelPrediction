@@ -1,6 +1,6 @@
 # @file DeepNN.R
 #
-# Copyright 2018 Observational Health Data Sciences and Informatics
+# Copyright 2019 Observational Health Data Sciences and Informatics
 #
 # This file is part of PatientLevelPrediction
 #
@@ -106,7 +106,7 @@ fitDeepNN <- function(plpData,population, param, search='grid', quiet=F,
   if(!'ffdf'%in%class(plpData$covariates) )
     stop('DeepNN requires plpData in coo format')
   if(!is.null(plpData$timeRef)){
-    Warning('Data temporal but deepNN uses non-temporal data...')
+    warning('Data temporal but deepNN uses non-temporal data...')
   }
   
   metaData <- attr(population, 'metaData')
@@ -120,7 +120,7 @@ fitDeepNN <- function(plpData,population, param, search='grid', quiet=F,
   data <- result$data
   
   #one-hot encoding
-  population$y <- population$outcomeCount#keras::to_categorical(population$outcomeCount, length(unique(population$outcomeCount)))
+  population$y <- keras::to_categorical(population$outcomeCount, length(unique(population$outcomeCount)))
   
   # do cross validation to find hyperParameter
   datas <- list(population=population, plpData=data)
@@ -133,19 +133,24 @@ fitDeepNN <- function(plpData,population, param, search='grid', quiet=F,
   
   #now train the final model and return coef
   bestInd <- which.max(abs(unlist(hyperParamSel)-0.5))[1]
-  finalModel<-do.call(trainDeepNN, c(param[[bestInd]],datas, train=FALSE))$model
+  finalModel<-do.call(trainDeepNN, c(param[[bestInd]],datas, train=FALSE))
   
   covariateRef <- ff::as.ram(plpData$covariateRef)
   incs <- rep(1, nrow(covariateRef)) 
   covariateRef$included <- incs
+  covariateRef$covariateValue <- rep(0, nrow(covariateRef))
   
   #modelTrained <- file.path(outLoc) 
   param.best <- param[[bestInd]]
   
   comp <- start-Sys.time()
   
+  # train prediction
+  prediction <- finalModel$prediction
+  finalModel$prediction <- NULL
+  
   # return model location 
-  result <- list(model = finalModel,
+  result <- list(model = finalModel$model,
                  trainCVAuc = -1, # ToDo decide on how to deal with this
                  hyperParamSearch = hyperSummary,
                  modelSettings = list(model='fitDeepNN',modelParameters=param.best),
@@ -155,7 +160,8 @@ fitDeepNN <- function(plpData,population, param, search='grid', quiet=F,
                  cohortId=cohortId,
                  varImp = covariateRef, 
                  trainingTime =comp,
-                 covariateMap=result$map
+                 covariateMap=result$map,
+                 predictionTrain = prediction
   )
   class(result) <- 'plpModel'
   attr(result, 'type') <- 'deep'
@@ -170,7 +176,7 @@ trainDeepNN<-function(plpData, population,
                       lr =1e-4, decay=1e-5, outcome_weight = 1.0, batch_size = 100, 
                       epochs= 100, seed=NULL, train=TRUE, ...){
   
-  writeLines(paste('Training deep neural network with ',length(unique(population$indexes)),' fold CV'))
+  ParallelLogger::logInfo(paste('Training deep neural network with ',length(unique(population$indexes)),' fold CV'))
   if(!is.null(population$indexes) && train==T){
     index_vect <- unique(population$indexes)
     perform <- c()
@@ -181,7 +187,7 @@ trainDeepNN<-function(plpData, population,
     attr(predictionMat, "metaData") <- list(predictionType = "binary")
     
     for(index in 1:length(index_vect )){
-      writeLines(paste('Fold ',index, ' -- with ', sum(population$indexes!=index),'train rows'))
+      ParallelLogger::logInfo(paste('Fold ',index, ' -- with ', sum(population$indexes!=index),'train rows'))
       
       model <- keras::keras_model_sequential()
       
@@ -190,7 +196,7 @@ trainDeepNN<-function(plpData, population,
         keras::layer_dense(units=units1, #activation='identify', 
                            input_shape=ncol(plpData)) %>%
         keras::layer_dropout(layer_dropout) %>%
-        keras::layer_dense(units=1, activation='sigmoid', use_bias = T)
+        keras::layer_dense(units=2, activation='sigmoid', use_bias = T)
       } else if(is.na(units3)){
         model %>%
           keras::layer_dense(units=units1, #activation='identify', 
@@ -199,7 +205,7 @@ trainDeepNN<-function(plpData, population,
           keras::layer_dense(units=units2 #,activation='identify'
                              ) %>%
           keras::layer_dropout(layer_dropout) %>%
-          keras::layer_dense(units=1, activation='sigmoid', use_bias = T)
+          keras::layer_dense(units=2, activation='sigmoid', use_bias = T)
       } else{
         model %>%
           keras::layer_dense(units=units1, #activation='identify', 
@@ -211,29 +217,49 @@ trainDeepNN<-function(plpData, population,
           keras::layer_dense(units=units3 #,activation='identify'
                              ) %>%
           keras::layer_dropout(layer_dropout) %>%
-          keras::layer_dense(units=1, activation='sigmoid', use_bias = T)
+          keras::layer_dense(units=2, activation='sigmoid', use_bias = T)
       }
       
+
+      # Prepare model for training
       model %>% keras::compile(
-        loss = 'binary_crossentropy'
-        ,metrics = c('accuracy'),
-        #optimizer = "adadelta"
+        loss = "binary_crossentropy",
+        metrics = c('accuracy'),
         optimizer = keras::optimizer_rmsprop(lr = lr,decay = decay)
       )
+      earlyStopping=keras::callback_early_stopping(monitor = "val_loss", patience=10,mode="auto",min_delta = 1e-4)
+      reduceLr=keras::callback_reduce_lr_on_plateau(monitor="val_loss", factor =0.1, 
+                                                    patience = 5,mode = "auto", min_delta = 1e-5, cooldown = 0, min_lr = 0)
       
       class_weight=list("0"=1,"1"=outcome_weight)
-      maxVal <- sum(population$indexes!=index)
-      batches <- lapply(1:ceiling(maxVal/batch_size), function(x) ((x-1)*batch_size+1):min((x*batch_size),maxVal))
       
-      for(e in 1:epochs){
-        for(batch in batches){
-          model %>%keras::train_on_batch(x=as.array(plpData[population$rowId[population$indexes!=index],][batch,]),
-                                         y=population$y[population$indexes!=index][batch]
-                                         #,callbacks=list(earlyStopping,reduceLr)
-                                         ,class_weight=class_weight
-          )
+      data <- plpData[population$rowId[population$indexes!=index],,]
+      
+      #Extract validation set first - 10k people or 5%
+      valN <- min(10000,sum(population$indexes!=index)*0.05)
+      val_rows<-sample(1:sum(population$indexes!=index), valN, replace=FALSE)
+      train_rows <- c(1:sum(population$indexes!=index))[-val_rows]
+      
+      sampling_generator<-function(data, population, batch_size, train_rows, index){
+        function(){
+          gc()
+          rows<-sample(train_rows, batch_size, replace=FALSE)
+          
+          list(as.array(data[rows,,]),
+               population$y[population$indexes!=index,1:2][rows,])
         }
       }
+      
+      
+      #print(table(population$y))
+      
+      history <- model %>% keras::fit_generator(sampling_generator(data,population,batch_size,train_rows, index),
+                                                steps_per_epoch = sum(population$indexes!=index)/batch_size,
+                                                epochs=epochs,
+                                                validation_data=list(as.array(data[val_rows,,]),
+                                                                     population$y[population$indexes!=index,1:2][val_rows,]),
+                                                callbacks=list(earlyStopping,reduceLr),
+                                                class_weight=class_weight)
       
       
       # batch prediciton 
@@ -243,7 +269,7 @@ trainDeepNN<-function(plpData, population,
       prediction$value <- 0
       for(batch in batches){
         pred <- keras::predict_proba(model, as.array(plpData[population$rowId[population$indexes==index],][batch,]))
-        prediction$value[batch] <- pred
+        prediction$value[batch] <- pred[,2]
       }
       
       attr(prediction, "metaData") <- list(predictionType = "binary")
@@ -262,9 +288,9 @@ trainDeepNN<-function(plpData, population,
     param.val <- paste0('units1: ',units1,'units2: ',units2,'units3: ',units3,
                         'layer_dropout: ',layer_dropout,'-- lr: ', lr,
                         '-- decay: ', decay, '-- batch_size: ',batch_size, '-- epochs: ', epochs)
-    writeLines('==========================================')
-    writeLines(paste0('CIReNN with parameters:', param.val,' obtained an AUC of ',auc))
-    writeLines('==========================================')
+    ParallelLogger::logInfo('==========================================')
+    ParallelLogger::logInfo(paste0('DeepNN with parameters:', param.val,' obtained an AUC of ',auc))
+    ParallelLogger::logInfo('==========================================')
     
   } else {
     
@@ -274,7 +300,7 @@ trainDeepNN<-function(plpData, population,
         keras::layer_dense(units=units1, #activation='identify', 
                            input_shape=ncol(plpData)) %>%
         keras::layer_dropout(layer_dropout) %>%
-        keras::layer_dense(units=1, activation='sigmoid', use_bias = T)
+        keras::layer_dense(units=2, activation='sigmoid', use_bias = T)
     } else if(is.na(units3)){
       model %>%
         keras::layer_dense(units=units1, #activation='identify', 
@@ -283,7 +309,7 @@ trainDeepNN<-function(plpData, population,
         keras::layer_dense(units=units2 #,activation='identify'
                            ) %>%
         keras::layer_dropout(layer_dropout) %>%
-        keras::layer_dense(units=1, activation='sigmoid', use_bias = T)
+        keras::layer_dense(units=2, activation='sigmoid', use_bias = T)
     } else{
       model %>%
         keras::layer_dense(units=units1, #activation='identify', 
@@ -295,45 +321,64 @@ trainDeepNN<-function(plpData, population,
         keras::layer_dense(units=units3 #,activation='identify'
                            ) %>%
         keras::layer_dropout(layer_dropout) %>%
-        keras::layer_dense(units=1, activation='sigmoid', use_bias = T)
+        keras::layer_dense(units=2, activation='sigmoid', use_bias = T)
     }
     
+    # Prepare model for training
     model %>% keras::compile(
-      loss = 'binary_crossentropy'
-      ,metrics = c('accuracy'),
-      #optimizer = "adadelta"
+      loss = "binary_crossentropy",
+      metrics = c('accuracy'),
       optimizer = keras::optimizer_rmsprop(lr = lr,decay = decay)
     )
+    earlyStopping=keras::callback_early_stopping(monitor = "val_loss", patience=10,mode="auto",min_delta = 1e-4)
+    reduceLr=keras::callback_reduce_lr_on_plateau(monitor="val_loss", factor =0.1, 
+                                                  patience = 5,mode = "auto", min_delta = 1e-5, cooldown = 0, min_lr = 0)
     
     class_weight=list("0"=1,"1"=outcome_weight)
     
-    maxVal <- length(population$indexes)
-    batches <- lapply(1:ceiling(maxVal/batch_size), function(x) ((x-1)*batch_size+1):min((x*batch_size),maxVal))
+    #Extract validation set first - 10k people or 5%
+    valN <- min(10000,nrow(population)*0.05)
+    val_rows<-sample(1:nrow(population), valN, replace=FALSE)
+    train_rows <- c(1:nrow(population))[-val_rows]
     
-    for(e in 1:epochs){
-      for(batch in batches){
-        model %>% keras::train_on_batch(x=as.array(plpData[batch,,]),
-                                        y=population$y[batch]
-                                        ,class_weight=class_weight
-        )
+    sampling_generator<-function(data, population, batch_size, train_rows){
+      function(){
+        gc()
+        rows<-sample(train_rows, batch_size, replace=FALSE)
+        
+        list(as.array(data[rows,,]),
+             population$y[,1:2][rows,])
       }
     }
+
+    history <- model %>% keras::fit_generator(sampling_generator(plpData,population,batch_size,train_rows),
+                                              steps_per_epoch = nrow(population)/batch_size,
+                                              epochs=epochs,
+                                              validation_data=list(as.array(plpData[val_rows,,]),
+                                                                   population$y[val_rows,1:2]),
+                                              callbacks=list(earlyStopping,reduceLr),
+                                              class_weight=class_weight)
     
-    # batched prediciton 
+    
+    # batch prediciton 
+    maxVal <- nrow(population)
+    batches <- lapply(1:ceiling(maxVal/batch_size), function(x) ((x-1)*batch_size+1):min((x*batch_size),maxVal))
     prediction <- population
     prediction$value <- 0
     for(batch in batches){
       pred <- keras::predict_proba(model, as.array(plpData[batch,]))
-      prediction$value[batch] <- pred
+      prediction$value[batch] <- pred[,2]
     }
     
     attr(prediction, "metaData") <- list(predictionType = "binary")
     auc <- computeAuc(prediction)
     foldPerm <- auc
+    predictionMat <- prediction
   }
   
   result <- list(model=model,
                  auc=auc,
+                 prediction = predictionMat,
                  hyperSum = unlist(list(units1=units1,units2=units2,units3=units3, 
                                         layer_dropout=layer_dropout,lr =lr, decay=decay,
                                         batch_size = batch_size, epochs= epochs))

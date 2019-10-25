@@ -1,6 +1,6 @@
 /************************************************************************
 @file GetCohorts.sql
-Copyright 2017 Observational Health Data Sciences and Informatics
+Copyright 2019 Observational Health Data Sciences and Informatics
 This file is part of CohortMethod
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -61,7 +61,7 @@ INTO #cohort_person
 
 {@use_sample}?{From ( select * 
                 from ( select *, 
-                row_number() over (order by ((person_id*month(cohort_start_date)) % 123)*((year(cohort_start_date)*day(cohort_start_date)) % 123)) rn 
+                row_number() over (order by (CAST(person_id*month(cohort_start_date) AS BIGINT) % 123)*(CAST(year(cohort_start_date)*day(cohort_start_date) AS BIGINT) % 123)) rn
   } 
 
 FROM (

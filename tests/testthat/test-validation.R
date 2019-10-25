@@ -1,4 +1,4 @@
-# Copyright 2017 Observational Health Data Sciences and Informatics
+# Copyright 2019 Observational Health Data Sciences and Informatics
 #
 # This file is part of PatientLevelPrediction
 #
@@ -15,6 +15,7 @@
 # limitations under the License.
 
 library("testthat")
+context("Validation")
 
 # Test unit for the creation of the study externalValidatePlp
 

@@ -1,6 +1,6 @@
 # @file Evaluate.R
 #
-# Copyright 2018 Observational Health Data Sciences and Informatics
+# Copyright 2019 Observational Health Data Sciences and Informatics
 #
 # This file is part of PatientLevelPrediction
 #
@@ -31,72 +31,90 @@
 #' @export
 evaluatePlp <- function(prediction, plpData){
 
+  # check logger
+  if(length(ParallelLogger::getLoggers())==0){
+    logger <- ParallelLogger::createLogger(name = "SIMPLE",
+                                        threshold = "INFO",
+                                        appenders = list(ParallelLogger::createConsoleAppender(layout = ParallelLogger::layoutTimestamp)))
+    ParallelLogger::registerLogger(logger)
+  }
+
   # checking inputs
   #========================================
   type <- attr(prediction, "metaData")$predictionType
   if (type != "binary") {
-    flog.fatal('Currently only support binary classification models')
-    stop()
+    stop('Currently only support binary classification models')
   }
 
   if(is.null(prediction$outcomeCount)){
-    flog.fatal('No outcomeCount column present')
-    stop()
+    stop('No outcomeCount column present')
   }
   if(length(unique(prediction$value))==1){
-    flog.fatal('Cannot evaluate as predictions all the same value')
-    stop()
+    stop('Cannot evaluate as predictions all the same value')
   }
   #============================
 
   # auc
-  flog.trace('Calculating AUC')
-  if(nrow(prediction) < 100000){
+  ParallelLogger::logTrace('Calculating AUC')
+  if(sum(prediction$outcomeCount>0) < 1000){
     auc <- computeAuc(prediction, confidenceInterval = T)
-    flog.info(sprintf('%-20s%.2f', 'AUC: ', auc[1]*100))
+    ParallelLogger::logInfo(sprintf('%-20s%.2f', 'AUC: ', auc[1]*100))
+    ParallelLogger::logInfo(sprintf('%-20s%.2f', '95% lower AUC: ', auc[2]*100))
+    ParallelLogger::logInfo(sprintf('%-20s%.2f', '95% upper AUC: ', auc[3]*100))
   } else{
     # speed issues with big data so using AUC package
-    auc <- AUC::auc(AUC::roc(prediction$value, factor(prediction$outcomeCount)))
-    flog.info(sprintf('%-20s%.2f', 'AUC: ', auc*100))
+    auc <- data.frame(auc = AUC::auc(AUC::roc(prediction$value, factor(prediction$outcomeCount))),
+                      auc_lb95ci = NA,
+                      auc_ub95ci = NA)
+    ParallelLogger::logInfo(sprintf('%-20s%.2f', 'AUC: ', auc[1]*100))
   }
 
-
+  # auprc
+  ParallelLogger::logTrace('Calculating AUPRC')
+  positive <- prediction$value[prediction$outcomeCount == 1]
+  negative <- prediction$value[prediction$outcomeCount == 0]
+  pr <- PRROC::pr.curve(scores.class0 = positive, scores.class1 = negative)
+  auprc <- pr$auc.integral
+  ParallelLogger::logInfo(sprintf('%-20s%.2f', 'AUPRC: ', auprc*100))
+  
   # brier scores-returnss; brier, brierScaled
-  flog.trace('Calculating Brier Score')
+  ParallelLogger::logTrace('Calculating Brier Score')
   brier <- brierScore(prediction)
-  flog.info(sprintf('%-20s%.2f', 'Brier: ', brier$brier))
+  ParallelLogger::logInfo(sprintf('%-20s%.2f', 'Brier: ', brier$brier))
 
   # 2) thresholdSummary
   # need to update thresholdSummary this with all the requested values
-  flog.trace(paste0('Calulating Threshold summary Started @ ',Sys.time()))
+  ParallelLogger::logTrace(paste0('Calulating Threshold summary Started @ ',Sys.time()))
   thresholdSummary <-getThresholdSummary(prediction) # rename and edit this
-  flog.trace(paste0('Completed @ ',Sys.time()))
 
+  ParallelLogger::logTrace(paste0('Completed @ ',Sys.time()))
+  
   # 3) demographicSummary
-  flog.trace(paste0('Calulating Demographic Based Evaluation Started @ ',Sys.time()))
-  demographicSummary <- getDemographicSummary(prediction, plpData)
-  flog.trace(paste0('Completed @ ',Sys.time()))
-  # need to edit covSettings to make age/gender always calculated!
+  ParallelLogger::logTrace(paste0('Calulating Demographic Based Evaluation Started @ ',Sys.time()))
+  demographicSummary <- tryCatch(getDemographicSummary(prediction, plpData),
+                                 error= function(cond){return(NULL)})
+  ParallelLogger::logTrace(paste0('Completed @ ',Sys.time()))
+
 
   # calibration linear fit- returns gradient, intercept
-  flog.trace('Calculating Calibration Line')
+  ParallelLogger::logTrace('Calculating Calibration Line')
   calLine10 <- calibrationLine(prediction, numberOfStrata = 10)
-  flog.info(sprintf('%-20s%.2f%-20s%.2f', 'Calibration gradient: ', calLine10$lm[2], ' intercept: ',calLine10$lm[1]))
+  ParallelLogger::logInfo(sprintf('%-20s%.2f%-20s%.2f', 'Calibration gradient: ', calLine10$lm[2], ' intercept: ',calLine10$lm[1]))
   # 4) calibrationSummary
-  flog.trace(paste0('Calculating Calibration Summary Started @ ',Sys.time()))
+  ParallelLogger::logTrace(paste0('Calculating Calibration Summary Started @ ',Sys.time()))
   calibrationSummary <- getCalibration(prediction,
                                        numberOfStrata = 10,
                                        truncateFraction = 0.01)
-  flog.trace(paste0('Completed @ ',Sys.time()))
+  ParallelLogger::logTrace(paste0('Completed @ ',Sys.time()))
 
   # 5) predictionDistribution - done
-  flog.trace(paste0('Calculating Quantiles Started @ ',Sys.time()))
+  ParallelLogger::logTrace(paste0('Calculating Quantiles Started @ ',Sys.time()))
   predictionDistribution <- getPredictionDistribution(prediction)
-  flog.trace(paste0('Completed @ ',Sys.time()))
+  ParallelLogger::logTrace(paste0('Completed @ ',Sys.time()))
 
   # Extra: Average Precision
   aveP.val <- averagePrecision(prediction)
-  flog.info(sprintf('%-20s%.2f', 'Average Precision: ', aveP.val))
+  ParallelLogger::logInfo(sprintf('%-20s%.2f', 'Average Precision: ', aveP.val))
 
   # evaluationStatistics:
   evaluationStatistics <- list(analysisId= attr(prediction, "metaData")$analysisId,
@@ -104,9 +122,10 @@ evaluatePlp <- function(prediction, plpData){
                                outcomeCount = sum(prediction$outcomeCount),
                                # need to add analysisId to metaData!
                                AUC= auc,
-                               BrierScore = brier$brier,
-                               BrierScaled= brier$brierScaled,
-                               CalibrationIntercept= calLine10$lm[1],
+                               AUPRC = auprc,
+                               BrierScore = brier$brier,	
+                               BrierScaled= brier$brierScaled,	
+                               CalibrationIntercept= calLine10$lm[1],	
                                CalibrationSlope = calLine10$lm[2])
 
   result <- list(evaluationStatistics= evaluationStatistics,
@@ -419,8 +438,8 @@ getThresholdSummary <- function(prediction){
 
   # get 100 points of distribution:
   # get the predictionThreshold and preferenceThreshold
-  predictionThreshold <- stats::quantile(prediction$value, probs=seq(0,0.99,0.01))
-  preferenceThreshold <- stats::quantile(prediction$preferenceScore, seq(0,0.99,0.01))
+  predictionThreshold <- stats::quantile(prediction$value, probs=seq(0,0.99,0.01),na.rm=TRUE)
+  preferenceThreshold <- stats::quantile(prediction$preferenceScore, seq(0,0.99,0.01),na.rm=TRUE)
   
   # fix quantile bug when not enought unique values - this seems to get rid of issue
   for (val in names(table(predictionThreshold))[table(predictionThreshold)>1])
@@ -615,9 +634,8 @@ getDemographicSummary <- function(prediction, plpData){
       
       ageCovariates <- plpData$covariates[ffbase::`%in%`(plpData$covariates$covariateId, 
                                                          plpData$covariateRef$covariateId[plpData$covariateRef$analysisId==3]), ]
-      #ageCovariates <- ageCovariates[ffbase::`%in%`(ageCovariates$rowId, prediction$rowId), ]
-      #ageCovariates <- ff::as.ram(ageCovariates)
       ageCovariates <- ff::as.ram(ageCovariates)[ff::as.ram(ageCovariates$rowId%in%prediction$rowId),]
+      
       prediction$ageId <- 0
       prediction$ageId[match(ageCovariates$rowId, prediction$rowId)] <- ageCovariates$covariateId
       

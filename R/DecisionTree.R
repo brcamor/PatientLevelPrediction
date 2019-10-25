@@ -1,6 +1,6 @@
 # @file DecisionTree.R
 #
-# Copyright 2018 Observational Health Data Sciences and Informatics
+# Copyright 2019 Observational Health Data Sciences and Informatics
 #
 # This file is part of PatientLevelPrediction
 #
@@ -31,19 +31,19 @@
 #' }
 #' @export
 setDecisionTree <- function(maxDepth=10 ,minSamplesSplit=2 ,minSamplesLeaf=10,
-                            minImpurityDecrease=10^-7,seed =NULL, classWeight='None', 
-                            plot=F  ){
-  if(!class(seed)%in%c('numeric','NULL'))
+                             minImpurityDecrease=10^-7,seed =NULL, classWeight='None', 
+                             plot=F  ){
+  if(!class(seed)%in%c('numeric','NULL', 'integer'))
     stop('Invalid seed')
-  if(class(maxDepth)!='numeric')
+  if(!class(maxDepth) %in% c("numeric", "integer"))
     stop('maxDepth must be a numeric value >0 ')
-  if(maxDepth < 1)
+  if(min(maxDepth) < 1)
     stop('maxDepth must be greater that 0 or -1')
-  if(class(minSamplesSplit)!='numeric')
+  if(!class(minSamplesSplit) %in% c("numeric", "integer") )
     stop('minSamplesSplit must be a numeric value >1')
   if(min(minSamplesSplit) < 2)
     stop('minSamplesSplit must be greater that 1')
-  if(class(minSamplesLeaf)!='numeric')
+  if(!class(minSamplesLeaf) %in% c("numeric", "integer"))
     stop('minSamplesLeaf must be a numeric value >0')
   if(min(minSamplesLeaf) < 1)
     stop('minSamplesLeaf must be greater that 0')
@@ -53,30 +53,29 @@ setDecisionTree <- function(maxDepth=10 ,minSamplesSplit=2 ,minSamplesLeaf=10,
     stop('minImpurityDecrease must be greater that 0')
   if(class(classWeight) !='character')
     stop('classWeight must be a character of either None or balanced')
-  if(!classWeight%in%c('None','balanced'))
+  if(sum(!classWeight%in%c('None','balanced'))!=0)
     stop('classWeight must be a character of either None or balanced')
   if(class(plot) !='logical')
     stop('Plot must be logical')
-
+  
   # test python is available and the required dependancies are there:
-  if (!PythonInR::pyIsConnected()){
-    tryCatch({
-      python.test <- PythonInR::autodetectPython(pythonExePath = NULL)
-    }, error = function(err){
-      stop('Python was not found on your system. See the vignette for instructions.')
-    }  
-    )
+  ##checkPython()
+  
+  # set seed
+  if(is.null(seed[1])){
+    seed <- as.integer(sample(100000000,1))
   }
+  
   result <- list(model='fitDecisionTree', 
                  param= split(expand.grid(maxDepth=maxDepth, 
                                           minSamplesSplit=minSamplesSplit,
                                           minSamplesLeaf=minSamplesLeaf,
                                           minImpurityDecrease=minImpurityDecrease,
                                           classWeight=classWeight,
-                                          seed=ifelse(is.null(seed),'NULL', seed),
+                                          seed=seed[1],
                                           plot=plot[1]),
                               1:(length(classWeight)*length(maxDepth)*length(minSamplesSplit)*length(minSamplesLeaf)*length(minImpurityDecrease))  )
-                              ,
+                 ,
                  name='DecisionTree')
   class(result) <- 'modelSettings' 
   
@@ -84,7 +83,7 @@ setDecisionTree <- function(maxDepth=10 ,minSamplesSplit=2 ,minSamplesLeaf=10,
 }
 
 fitDecisionTree <- function(population, plpData, param, search='grid', quiet=F,
-                        outcomeId, cohortId , ...){
+                             outcomeId, cohortId , ...){
   
   # check plpData is libsvm format or convert if needed
   if(!'ffdf'%in%class(plpData$covariates))
@@ -96,77 +95,75 @@ fitDecisionTree <- function(population, plpData, param, search='grid', quiet=F,
   }
   
   # connect to python if not connected
-  if ( !PythonInR::pyIsConnected() || .Platform$OS.type=="unix"){ 
-    PythonInR::pyConnect()
-    PythonInR::pyOptions("numpyAlias", "np")
-    PythonInR::pyOptions("useNumpy", TRUE)
-    PythonInR::pyImport("numpy", as='np')}
+  ##initiatePython()
   
-  
-  # return error if we can't connect to python
-  if ( !PythonInR::pyIsConnected() )
-    stop('Python not connect error')
-  
-  PythonInR::pyExec('quiet = True')
   if(quiet==F){
     writeLines(paste0('Training decision tree model...' ))
-    PythonInR::pyExec('quiet = False')
   }
   start <- Sys.time()
   
   population$rowIdPython <- population$rowId-1 # -1 to account for python/r index difference
-  PythonInR::pySet('population', as.matrix(population[,c('rowIdPython','outcomeCount','indexes')]) )
+  pPopulation <- as.matrix(population[,c('rowIdPython','outcomeCount','indexes')])
   
   # convert plpData in coo to python:
-  x <- toSparsePython(plpData,population, map=NULL)
+  x <- toSparseM(plpData,population, map=NULL)
   
-  # save the model to outLoc  TODO: make this an input or temp location?
-  outLoc <- file.path(getwd(),'python_models')
+  # save the model to outLoc
+  outLoc <- createTempModelLoc()
   # clear the existing model pickles
   for(file in dir(outLoc))
     file.remove(file.path(outLoc,file))
   
-  # run model:
-  outLoc <- file.path(getwd(),'python_models')
-  PythonInR::pySet("modelOutput",outLoc)
+  pydata <- reticulate::r_to_py(x$data)
   
   # feed into variable names for tree plot...
   var <- suppressWarnings(ff::as.ram(plpData$covariateRef$covariateName))
-  PythonInR::pySet('varnames', as.matrix(as.character(var)  ))
   
-  
-  # send the column names for the plot:
-  ##PythonInR::pySet('variables', as.matrix(ff::as.ram(plpData$covariateRef$covariateName)) )
-  
-  # do cross validation to find hyperParameter
-  # do cross validation to find hyperParameter
-  hyperParamSel <- lapply(param, function(x) do.call(trainDecisionTree, c(x, train=TRUE)  ))
+  hyperParamSel <- lapply(param, function(x) do.call(trainDecisionTree, 
+                                                     listAppend(x, list(train=TRUE,
+                                                                        population = pPopulation, 
+                                                                        plpData = pydata, 
+                                                                        quiet=quiet, 
+                                                                        var=var,
+                                                                        modelOutput=outLoc))  ))
   
   hyperSummary <- cbind(do.call(rbind, param), unlist(hyperParamSel))
   
   #now train the final model and return coef
   bestInd <- which.max(abs(unlist(hyperParamSel)-0.5))[1]
-  finalModel <- do.call(trainDecisionTree, c(param[[bestInd]], train=FALSE))
+  finalModel <- do.call(trainDecisionTree, listAppend(param[[bestInd]], list(train=FALSE,
+                                                                             population = pPopulation, 
+                                                                             plpData = pydata, 
+                                                                             quiet=quiet, 
+                                                                             var=var,
+                                                                             modelOutput=outLoc)))
   
   #now train the final model and return coef
-
+  
   # get the coefs and do a basic variable importance:
-  varImp <- PythonInR::pyGet('dt.feature_importances_', simplify = F)[,1]
+  varImp <- finalModel[[2]]
   varImp[is.na(varImp)] <- 0
-  #varImp <- PythonInR::pyGet('mlp.coefs_[0]', simplify = F)[,1]
-  #varImp[is.na(varImp)] <- 0
   
   covariateRef <- ff::as.ram(plpData$covariateRef)
   incs <- rep(1, nrow(covariateRef))
   covariateRef$included <- incs
-  covariateRef$covariateValue <- unlist(varImp)
+  covariateRef$covariateValue <- varImp
   
   
   # select best model and remove the others  (!!!NEED TO EDIT THIS)
   modelTrained <- file.path(outLoc) 
-  param.best <- NULL
+  param.best <- param[[bestInd]]
   
   comp <- start-Sys.time()
+  
+  # train prediction
+  pred <- finalModel[[1]]
+  pred[,1] <- pred[,1] + 1 # converting from python to r index
+  colnames(pred) <- c('rowId','outcomeCount','indexes', 'value')
+  pred <- as.data.frame(pred)
+  attr(pred, "metaData") <- list(predictionType="binary")
+  prediction <- merge(population, pred[,c('rowId', 'value')], by='rowId')
+  
   
   # return model location (!!!NEED TO ADD CV RESULTS HERE)
   result <- list(model = modelTrained,
@@ -179,10 +176,12 @@ fitDecisionTree <- function(population, plpData, param, search='grid', quiet=F,
                  cohortId=cohortId,
                  varImp = covariateRef,
                  trainingTime =comp,
-                 dense=0
+                 dense=0,
+                 covariateMap=x$map,
+                 predictionTrain = prediction
   )
   class(result) <- 'plpModel'
-  attr(result, 'type') <- 'python'
+  attr(result, 'type') <- 'pythonReticulate'
   attr(result, 'predictionType') <- 'binary'
   
   
@@ -190,37 +189,33 @@ fitDecisionTree <- function(population, plpData, param, search='grid', quiet=F,
 }
 
 
-trainDecisionTree <- function(maxDepth=10 ,minSamplesSplit=2 ,minSamplesLeaf=10,
-                              minImpurityDecrease=10^-7,classWeight='None',seed =NULL,
-                              train=TRUE, plot=F,quiet=F){
-  #PythonInR::pySet('size', as.matrix(size) )
-  #PythonInR::pySet('alpha', as.matrix(alpha) )
-  PythonInR::pyExec(paste0("max_depth = ", maxDepth))
-  PythonInR::pyExec(paste0("min_samples_split = ", minSamplesSplit))
-  PythonInR::pyExec(paste0("min_samples_leaf = ", minSamplesLeaf))
-  PythonInR::pyExec(paste0("min_impurity_decrease = ", minImpurityDecrease))
-  ifelse(classWeight=='None', PythonInR::pyExec(paste0("class_weight = ", classWeight)), 
-         PythonInR::pyExec(paste0("class_weight = '", classWeight,"'")))
-  PythonInR::pyExec(paste0("seed = ", ifelse(is.null(seed),'None',seed)))
-  #==== editied
-  # set the plotting variable
-  PythonInR::pyExec("plot= False")
-  if(plot)
-    PythonInR::pyExec("plot= True")
-  #=========
-  if(train)
-    PythonInR::pyExec("train = True")
-  if(!train)
-    PythonInR::pyExec("train = False")
+trainDecisionTree <- function(population, plpData, 
+                              maxDepth=10 ,minSamplesSplit=2 ,minSamplesLeaf=10,
+                              minImpurityDecrease=10^-7,classWeight='None',
+                              seed =NULL,
+                              train=TRUE, plot=F,quiet=F, var, modelOutput){
   
-  # then run standard python code
-  PythonInR::pyExecfile(system.file(package='PatientLevelPrediction','python','decisionTree.py'))
+  e <- environment()
+  reticulate::source_python(system.file(package='PatientLevelPrediction','python','decisionTreeFunctions.py'), envir = e)
+  
+  result <- train_decision_tree(population = population, 
+                                train = train,
+                                plpData = plpData, 
+                                plot = plot, 
+                                max_depth = as.integer(maxDepth), 
+                                min_samples_split = as.integer(minSamplesSplit), 
+                                min_samples_leaf = as.integer(minSamplesLeaf), 
+                                min_impurity_decrease = minImpurityDecrease, 
+                                class_weight = as.character(classWeight), 
+                                seed = as.integer(seed), 
+                                quiet = quiet,
+                                varNames = var, 
+                                modelOutput = modelOutput)
+  
   
   if(train){
     # then get the prediction 
-    pred <- PythonInR::pyGet('prediction', simplify = FALSE)
-    pred <-  apply(pred,1, unlist)
-    pred <- t(pred)
+    pred <- result
     colnames(pred) <- c('rowId','outcomeCount','indexes', 'value')
     pred <- as.data.frame(pred)
     attr(pred, "metaData") <- list(predictionType="binary")
@@ -232,4 +227,5 @@ trainDecisionTree <- function(maxDepth=10 ,minSamplesSplit=2 ,minSamplesLeaf=10,
     return(auc)
   }
   
+  return(result)
 }

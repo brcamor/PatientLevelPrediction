@@ -1,6 +1,6 @@
 # @file PlpSaveLoad.R
 #
-# Copyright 2018 Observational Health Data Sciences and Informatics
+# Copyright 2019 Observational Health Data Sciences and Informatics
 #
 # This file is part of CohortMethod
 #
@@ -47,7 +47,7 @@
 #'                                     descendant concepts within that CONCEPT_ID will be used to
 #'                                     define the cohort.  If cohortTable <> DRUG_ERA, cohortId is
 #'                                     used to select the cohort_concept_id in the cohort-like table.
-#' @param outcomeIds                   A list of cohort_definition_ids used to define outcomes.
+#' @param outcomeIds                   A list of cohort_definition_ids used to define outcomes (-999 mean no outcome gets downloaded).
 #' @param studyStartDate               A calendar date specifying the minimum date that a cohort index
 #'                                     date can appear. Date format is 'yyyymmdd'.
 #' @param studyEndDate                 A calendar date specifying the maximum date that a cohort index
@@ -127,7 +127,7 @@ getPlpData <- function(connectionDetails,
   if (studyEndDate != "" && regexpr("^[12][0-9]{3}[01][0-9][0-3][0-9]$", studyEndDate) == -1)
     stop("Study end date must have format YYYYMMDD")
   if(!is.null(sampleSize)){
-    if(class(sampleSize)!='numeric')
+    if(!class(sampleSize) %in% c('numeric', 'integer'))
       stop("sampleSize must be numeric")
   }
   
@@ -190,6 +190,7 @@ getPlpData <- function(connectionDetails,
                                                          cohortTableIsTemp = TRUE,
                                                          rowIdField = "row_id",
                                                          covariateSettings = covariateSettings)
+  if(max(outcomeIds)!=-999){
   writeLines("Fetching outcomes from server")
   start <- Sys.time()
   outcomeSql <- SqlRender::loadRenderTranslateSql("GetOutcomes.sql",
@@ -207,12 +208,15 @@ getPlpData <- function(connectionDetails,
   attr(outcomes, "metaData") <- metaData.outcome
   if(nrow(outcomes)==0)
     stop('No Outcomes')
-  
+
   metaData.cohort$attrition <- getCounts2(cohorts,outcomes, "Original cohorts")
   attr(cohorts, "metaData") <- metaData.cohort
   
   delta <- Sys.time() - start
   writeLines(paste("Loading outcomes took", signif(delta, 3), attr(delta, "units")))
+  } else {
+    outcomes <- NULL
+  }
   
   # Remove temp tables:
   renderedSql <- SqlRender::loadRenderTranslateSql("RemoveCohortTempTables.sql",
@@ -240,6 +244,7 @@ getPlpData <- function(connectionDetails,
   metaData$call$firstExposureOnly = firstExposureOnly
   metaData$call$washoutPeriod = washoutPeriod
   metaData$call$covariateSettings= covariateSettings
+  metaData$call$sampleSize = sampleSize
   
   # create the temporal settings (if temporal use)
   timeReference <- NULL
@@ -340,7 +345,7 @@ getCovariateData <- function(connection,
 #' @param file               The name of the folder where the data will be written. The folder should
 #'                           not yet exist.
 #' @param envir              The environment for to evaluate variables when saving
-#'
+#' @param overwrite          Whether to force overwrite an existing file
 #' @details
 #' The data will be written to a set of files in the folder specified by the user.
 #'
@@ -348,7 +353,7 @@ getCovariateData <- function(connection,
 #' # todo
 #'
 #' @export
-savePlpData <- function(plpData, file, envir=NULL) {
+savePlpData <- function(plpData, file, envir=NULL, overwrite=F) {
   if (missing(plpData))
     stop("Must specify plpData")
   if (missing(file))
@@ -374,20 +379,20 @@ savePlpData <- function(plpData, file, envir=NULL) {
       if(!is.null(plpData$timeRef)){
         analysisRef <- plpData$analysisRef
         timeRef <- plpData$timeRef
-        ffbase::save.ffdf(covariates, covariateRef,analysisRef,timeRef, dir = file, clone = TRUE)
+        ffbase::save.ffdf(covariates, covariateRef,analysisRef,timeRef, dir = file, clone = TRUE, overwrite = overwrite)
       } else {
         analysisRef <- plpData$analysisRef
-        ffbase::save.ffdf(covariates, covariateRef,analysisRef, dir = file, clone = TRUE)
+        ffbase::save.ffdf(covariates, covariateRef,analysisRef, dir = file, clone = TRUE, overwrite = overwrite)
       }
     } else {
-      ffbase::save.ffdf(covariates, covariateRef, dir = file, clone = TRUE)
+      ffbase::save.ffdf(covariates, covariateRef, dir = file, clone = TRUE, overwrite = overwrite)
     }
     
   } else{
     covariateRef <- plpData$covariateRef
     analysisRef <- plpData$analysisRef
     timeRef <- plpData$timeRef
-    ffbase::save.ffdf(covariateRef,analysisRef,timeRef, dir = file, clone = TRUE)
+    ffbase::save.ffdf(covariateRef,analysisRef,timeRef, dir = file, clone = TRUE, overwrite = overwrite)
     saveRDS(plpData$covariates, file = file.path(file, "covariates.rds"))
   }
   saveRDS(plpData$cohorts, file = file.path(file, "cohorts.rds"))
@@ -634,61 +639,34 @@ savePlpModel <- function(plpModel, dirPath){
   
   if(!dir.exists(dirPath)) dir.create(dirPath)
   
-  #==================================================================
-  # if python then move pickle
-  #==================================================================
-  if(attr(plpModel, 'type') =='python'){
-    if(!dir.exists(file.path(dirPath,'python_model')))
-      dir.create(file.path(dirPath,'python_model'))
-    for(file in dir(plpModel$model)){
-      file.copy(file.path(plpModel$model,file), 
-                file.path(dirPath,'python_model'), overwrite=TRUE,  recursive = FALSE,
-                copy.mode = TRUE, copy.date = FALSE)
-    }
-    
-    plpModel$model <- file.path(dirPath,'python_model')
-    plpModel$predict <- createTransform(plpModel)
-  }
   
+  # If model is saved on hard drive move it...
   #============================================================
-  
-  #==================================================================
-  # if knn then move model
-  #==================================================================
-  if(attr(plpModel, 'type') =='knn'){
-    if(!dir.exists(file.path(dirPath,'knn_model')))
-      dir.create(file.path(dirPath,'knn_model'))
-    for(file in dir(plpModel$model)){
-      file.copy(file.path(plpModel$model,file), 
-                file.path(dirPath,'knn_model'), overwrite=TRUE,  recursive = FALSE,
-                copy.mode = TRUE, copy.date = FALSE)
-    }
-    
-    plpModel$model <- file.path(dirPath,'knn_model')
-    plpModel$predict <- createTransform(plpModel)
+  moveFile <- moveHdModel(plpModel, dirPath )
+  if(!moveFile){
+    ParallelLogger::logError('Moving model files error')
   }
   #============================================================
     
-  #==================================================================
-  # if knn then move model
-  #==================================================================
-  if(attr(plpModel, 'type') =='knn'){
-    if(!dir.exists(file.path(dirPath,'knn_model')))
-      dir.create(file.path(dirPath,'knn_model'))
-    for(file in dir(plpModel$model)){
-      file.copy(file.path(plpModel$model,file), 
-                file.path(dirPath,'knn_model'), overwrite=TRUE,  recursive = FALSE,
-                copy.mode = TRUE, copy.date = FALSE)
-    }
-    
-    plpModel$model <- file.path(dirPath,'knn_model')
-    plpModel$predict <- createTransform(plpModel)
-  }
-  #============================================================
-  
+
   # if deep (keras) then save hdfs
-  if(attr(plpModel, 'type') =='deep'){
-    keras::save_model_hdf5(plpModel$model, filepath = file.path(dirPath, "keras_model"))
+  if(attr(plpModel, 'type')%in%c('deep', 'deepMulti','deepEnsemble')){
+    
+    if(attr(plpModel, 'type')=='deepEnsemble'){
+      tryCatch(
+        {#saveRDS(plpModel, file = file.path(dirPath,  "deepEnsemble_model.rds"))
+          for (i in seq(plpModel$modelSettings$modelParameters$numberOfEnsembleNetwork)){
+          model<-keras::serialize_model(plpModel$model[[i]], include_optimizer = TRUE)
+          keras::save_model_hdf5(model, filepath = file.path(dirPath, "keras_model",i))
+        }},error=function(e) NULL
+      )
+    }
+    if(attr(plpModel, 'type')=='deep'){
+      keras::save_model_hdf5(plpModel$model, filepath = file.path(dirPath, "keras_model"))
+    }
+    if(attr(plpModel, 'type')=='deepMulti'){
+      saveRDS(attr(plpModel, 'inputs'), file = file.path(dirPath,  "inputs_attr.rds"))
+    }
   } else {  
   saveRDS(plpModel$model, file = file.path(dirPath, "model.rds"))
   }
@@ -704,13 +682,56 @@ savePlpModel <- function(plpModel, dirPath){
   saveRDS(plpModel$dense, file = file.path(dirPath,  "dense.rds"))
   saveRDS(plpModel$cohortId, file = file.path(dirPath,  "cohortId.rds"))
   saveRDS(plpModel$outcomeId, file = file.path(dirPath,  "outcomeId.rds"))
-  if(!is.null(plpModel$covariateMap))
+  #if(!is.null(plpModel$covariateMap))
   saveRDS(plpModel$covariateMap, file = file.path(dirPath,  "covariateMap.rds"))
   
   attributes <- list(type=attr(plpModel, 'type'), predictionType=attr(plpModel, 'predictionType') )
   saveRDS(attributes, file = file.path(dirPath,  "attributes.rds"))
   
   
+}
+
+moveHdModel <- function(plpModel, dirPath ){
+  #==================================================================
+  # if python then move pickle
+  #==================================================================
+  if(attr(plpModel, 'type') %in% c('pythonOld','pythonReticulate', 'pythonAuto') ){
+    if(!dir.exists(file.path(dirPath,'python_model')))
+      dir.create(file.path(dirPath,'python_model'))
+    for(file in dir(plpModel$model)){   #DOES THIS CORRECTLY TRANSFER AUTOENCODER BITS?
+      file.copy(file.path(plpModel$model,file), 
+                file.path(dirPath,'python_model'), overwrite=TRUE,  recursive = FALSE,
+                copy.mode = TRUE, copy.date = FALSE)
+    }
+  }
+  
+  #==================================================================
+  # if sagemaker then move pickle
+  #==================================================================
+  if(attr(plpModel, 'type') =='sagemaker'){
+    if(!dir.exists(file.path(dirPath,'sagemaker_model')))
+      dir.create(file.path(dirPath,'sagemaker_model'))
+    for(file in dir(plpModel$model$loc)){
+      file.copy(file.path(plpModel$model$loc,file), 
+                file.path(dirPath,'sagemaker_model'), overwrite=TRUE,  recursive = FALSE,
+                copy.mode = TRUE, copy.date = FALSE)
+    }
+  }
+  
+  #==================================================================
+  # if knn then move model
+  #==================================================================
+  if(attr(plpModel, 'type') =='knn'){
+    if(!dir.exists(file.path(dirPath,'knn_model')))
+      dir.create(file.path(dirPath,'knn_model'))
+    for(file in dir(plpModel$model)){
+      file.copy(file.path(plpModel$model,file), 
+                file.path(dirPath,'knn_model'), overwrite=TRUE,  recursive = FALSE,
+                copy.mode = TRUE, copy.date = FALSE)
+    }
+  }
+  
+  return(TRUE)
 }
 
 #' loads the plp model
@@ -721,7 +742,6 @@ savePlpModel <- function(plpModel, dirPath){
 #' @param dirPath                  The location of the model
 #'
 #' @export
-
 loadPlpModel <- function(dirPath) {
   if (!file.exists(dirPath))
     stop(paste("Cannot find folder", dirPath))
@@ -734,11 +754,11 @@ loadPlpModel <- function(dirPath) {
   outcomeId <- tryCatch(readRDS(file.path(dirPath, "outcomeId.rds")),
                         error=function(e) NULL)
   cohortId <- tryCatch(readRDS(file.path(dirPath, "cohortId.rds")),
-                        error=function(e) NULL)  
+                       error=function(e) NULL)  
   dense <- tryCatch(readRDS(file.path(dirPath, "dense.rds")),
-                        error=function(e) NULL)  
+                    error=function(e) NULL)  
   covariateMap <- tryCatch(readRDS(file.path(dirPath, "covariateMap.rds")),
-                    error=function(e) NULL) 
+                           error=function(e) NULL) 
   
   if(file.exists(file.path(dirPath, "keras_model"))){
     model <- keras::load_model_hdf5(file.path(dirPath, "keras_model"))
@@ -760,50 +780,80 @@ loadPlpModel <- function(dirPath) {
                  cohortId= cohortId,
                  outcomeId = outcomeId,
                  covariateMap=covariateMap)
-
+  
   #attributes <- readRDS(file.path(dirPath, "attributes.rds"))
   attributes <- readRDS(file.path(dirPath, "attributes.rds"))
   attr(result, 'type') <- attributes$type
   attr(result, 'predictionType') <- attributes$predictionType
   class(result) <- "plpModel"
   
-  # if python update the location
-  if(attributes$type=='python'){
-    result$model <- file.path(dirPath,'python_model')
-    result$predict <- createTransform(result)
-  }
-  # if knn update the locaiton - TODO !!!!!!!!!!!!!!
-  
-  
+  # update the model location to the load dirPath
+  result <- updateModelLocation(result, dirPath)
+    
   return(result)
 }
 
-#' Saves the prediction dataframe to csv
+updateModelLocation  <- function(plpModel, dirPath){
+  type <- attr(plpModel, 'type')
+  # if python update the location
+  if( type %in% c('pythonOld','pythonReticulate', 'pythonAuto')){
+    plpModel$model <- file.path(dirPath,'python_model')
+    plpModel$predict <- createTransform(plpModel)
+  }
+  if( type =='sagemaker'){
+    plpModel$model$loc <- file.path(dirPath,'sagemaker_model')
+    plpModel$predict <- createTransform(plpModel)
+  }
+  # if knn update the locaiton - TODO !!!!!!!!!!!!!!
+  if( type =='knn'){
+    plpModel$model <- file.path(dirPath,'knn_model')
+    plpModel$predict <- createTransform(plpModel)
+  }
+  if( type =='deep' ){
+    plpModel$predict <- createTransform(plpModel)
+  }
+  if( type =='deepEnsemble' ){
+    plpModel$predict <- createTransform(plpModel)
+  }
+  if( type =='deepMulti'){
+    attr(plpModel, 'inputs') <- tryCatch(readRDS(file.path(dirPath, "inputs_attr.rds")),
+                                       error=function(e) NULL) 
+    plpModel$predict <- createTransform(plpModel)
+    
+  }
+  
+  return(plpModel) 
+}
+
+
+#' Saves the prediction dataframe to RDS
 #'
 #' @details
-#' Saves the prediction data frame returned by predict.R to a csv file
+#' Saves the prediction data frame returned by predict.R to an RDS file and returns the fileLocation where the prediction is saved
 #'
 #' @param prediction                   The prediciton data.frame
-#' @param dirPath                     The directory to save the csv
+#' @param dirPath                     The directory to save the prediction RDS
+#' @param fileName                    The name of the RDS file that will be saved in dirPath
 #' 
 #' @export
-savePrediction <- function(prediction, dirPath){
+savePrediction <- function(prediction, dirPath, fileName='prediction.rds'){
   #TODO check inupts
-  utils::write.csv(prediction, file=dirPath, row.names = F, col.names = T)
+  saveRDS(prediction, file=file.path(dirPath,fileName))
   
+  return(file.path(dirPath,fileName))
 }
 
 #' Loads the prediciton dataframe to csv
 #'
 #' @details
-#' Loads the prediciton  csv file
+#' Loads the prediciton  RDS file
 #'
-#' @param dirPath                     The directory to saved the csv
+#' @param fileLocation                     The location with the saved prediction
 #' 
 #' @export
-loadPrediction <- function(dirPath){
+loadPrediction <- function(fileLocation){
   #TODO check inupts
-  prediction <- utils::read.csv(file=dirPath, header = T)
+  prediction <- readRDS(file=fileLocation)
   return(prediction)
 }
 
@@ -868,117 +918,7 @@ loadPlpResult <- function(dirPath){
   
 }
 
-
-
-# this code is not needed now?
-writeOutput <- function(prediction, 
-                        performance.test, 
-                        performance.train, 
-                        plpModel,
-                        population,
-                        plpData,
-                        dirPath,
-                        analysisId,
-                        start.all,
-                        testSplit,
-                        modelLoc){
-  if(!dir.exists(file.path(dirPath,analysisId , 'test'))){dir.create(file.path(dirPath,analysisId , 'test'))}
-  utils::write.table(performance.test$raw, file.path(dirPath,analysisId , 'test','rocRawSparse.txt'), row.names=F)
-  utils::write.table(performance.test$preferenceScores, file.path(dirPath,analysisId , 'test','preferenceScoresSparse.txt'), row.names=F)
-  utils::write.table(performance.test$calSparse, file.path(dirPath,analysisId , 'test','calSparse.txt'), row.names=F)
-  utils::write.table(performance.test$calSparse2_10, file.path(dirPath,analysisId , 'test','calSparse2_10.txt'), row.names=F)
-  utils::write.table(performance.test$calSparse2_100, file.path(dirPath,analysisId , 'test','calSparse2_100.txt'), row.names=F)
-  utils::write.table(performance.test$quantiles, file.path(dirPath,analysisId , 'test','quantiles.txt'), row.names=F)
-  
-  if(!dir.exists(file.path(dirPath,analysisId , 'train'))){dir.create(file.path(dirPath,analysisId , 'train'))}
-  utils::write.table(performance.train$raw, file.path(dirPath,analysisId , 'train','rocRawSparse.txt'), row.names=F)
-  utils::write.table(performance.train$preferenceScores, file.path(dirPath,analysisId , 'train','preferenceScoresSparse.txt'), row.names=F)
-  utils::write.table(performance.train$calSparse, file.path(dirPath,analysisId , 'train','calSparse.txt'), row.names=F)
-  utils::write.table(performance.train$calSparse2_10, file.path(dirPath,analysisId , 'train','calSparse2_10.txt'), row.names=F)
-  utils::write.table(performance.train$calSparse2_100, file.path(dirPath,analysisId , 'train','calSparse2_100.txt'), row.names=F)
-  utils::write.table(performance.train$quantiles, file.path(dirPath,analysisId , 'train','quantiles.txt'), row.names=F)
-  
-  
-  #save plots:
-  grDevices::pdf(file.path(dirPath,analysisId,'plots.pdf'))
-  gridExtra::grid.arrange(performance.test$calPlot, 
-                          gridExtra::arrangeGrob(performance.test$prefScorePlot, performance.test$boxPlot), 
-                          nrow=2,
-                          top='Performance Plots')
-  print(PatientLevelPrediction::plotRoc(prediction[prediction$indexes<0,]))
-  
-  grDevices::dev.off()
-  
-  comp <- format(difftime(Sys.time(), start.all, units='hours'), nsmall=1)
-  
-  # make nice formated model info table and performance table
-  tryCatch({
-    modelInfo <- data.frame(modelId = analysisId,
-                            database = strsplit(do.call(paste, list(plpModel$metaData$call$cdmDatabaseSchema)), '\\.')[[1]][1],
-                            cohortId=attr(prediction, "metaData")$cohortId,
-                            outcomeId=attr(prediction, "metaData")$outcomeId,
-                            # add fold information and test/train size/ num events?
-                            model= plpModel$modelSettings$model,
-                            splitOn = testSplit,
-                            modelLoc =modelLoc ,
-                            populationLoc='NULL' ,
-                            parameters = paste(names(plpModel$modelSettings$modelParameters), unlist(plpModel$modelSettings$modelParameters), sep=':', collapse=','),
-                            modelTime = comp)
-  }, error= function(err){print(paste("MY_ERROR:  ",err))
-    writeLines(paste(plpData$metaData$call$cdmDatabaseSchema,attr(prediction, "metaData")$cohortId, plpModel$modelSettings$model, sep='-'))
-    
-  })
-  performanceInfoTest <- data.frame(modelId =analysisId,
-                                    AUC = performance.test$auc[1],
-                                    AUC_lb = performance.test$auc[2],
-                                    AUC_ub = performance.test$auc[3],
-                                    Brier = performance.test$brier,
-                                    BrierScaled = performance.test$brierScaled,
-                                    hosmerlemeshow_chi2 = performance.test$hosmerlemeshow[1],
-                                    hosmerlemeshow_df = performance.test$hosmerlemeshow[2],
-                                    hosmerlemeshow_pvalue = performance.test$hosmerlemeshow[3],
-                                    calibrationIntercept = performance.test$calibrationIntercept10,
-                                    calibrationGradient = performance.test$calibrationGradient10,
-                                    preference3070_0 = performance.test$preference3070_0,
-                                    preference3070_1 = performance.test$preference3070_1
-  )
-  
-  performanceInfoTrain <- data.frame(modelId =analysisId,
-                                     AUC = performance.train$auc[1],
-                                     AUC_lb = performance.train$auc[2],
-                                     AUC_ub = performance.train$auc[3],
-                                     Brier = performance.train$brier,
-                                     BrierScaled = performance.train$brierScaled,
-                                     hosmerlemeshow_chi2 = performance.train$hosmerlemeshow[1],
-                                     hosmerlemeshow_df = performance.train$hosmerlemeshow[2],
-                                     hosmerlemeshow_pvalue = performance.train$hosmerlemeshow[3],
-                                     calibrationIntercept = performance.train$calibrationIntercept10,
-                                     calibrationGradient = performance.train$calibrationGradient10,
-                                     preference3070_0 = performance.train$preference3070_0,
-                                     preference3070_1 = performance.train$preference3070_1
-  )
-  
-  # search for modelInfo in directory - if does not exist create and save model info table
-  # otherwise append model info to existing file
-  if(file.exists(file.path(dirPath, 'modelInfo.txt')))
-    utils::write.table(modelInfo, file.path(dirPath, 'modelInfo.txt'), append=T, row.names = F, col.names = F)
-  if(!file.exists(file.path(dirPath, 'modelInfo.txt')))
-    utils::write.table(modelInfo, file.path(dirPath, 'modelInfo.txt'), row.names = F)
-  
-  # repeat for performance info
-  if(file.exists(file.path(dirPath, 'performanceInfoTest.txt')))
-    utils::write.table(performanceInfoTest, file.path(dirPath, 'performanceInfoTest.txt'), append=T, row.names = F, col.names = F)
-  if(!file.exists(file.path(dirPath, 'performanceInfoTest.txt')))
-    utils::write.table(performanceInfoTest, file.path(dirPath, 'performanceInfoTest.txt'), row.names = F)
-  if(file.exists(file.path(dirPath, 'performanceInfoTrain.txt')))
-    utils::write.table(performanceInfoTrain, file.path(dirPath, 'performanceInfoTrain.txt'), append=T, row.names = F, col.names = F)
-  if(!file.exists(file.path(dirPath, 'performanceInfoTrain.txt')))
-    utils::write.table(performanceInfoTrain, file.path(dirPath, 'performanceInfoTrain.txt'), row.names = F)
-  
-  
-  
-}
-
+# MIGHT DELETE THIS:
 # Insert cohort definitions into package
 saveCirceDefinition <- function (definitionId, name = NULL,
                                             baseUrl = "https://enter_address")

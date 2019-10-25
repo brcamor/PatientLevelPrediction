@@ -1,4 +1,4 @@
-# Copyright 2017 Observational Health Data Sciences and Informatics
+# Copyright 2019 Observational Health Data Sciences and Informatics
 #
 # This file is part of PatientLevelPrediction
 #
@@ -39,8 +39,11 @@ population <- createStudyPopulation(plpData,
                                     #,verbosity=INFO
 )
 lr_model <- PatientLevelPrediction::setLassoLogisticRegression()
-lr_results <- tryCatch(runPlp(population = population, plpData = plpData,
-                              modelSettings = lr_model,
+lr_results <- tryCatch(runPlp(population = population, plpData = plpData, 
+                              verbosity = 'NONE',
+                              modelSettings = lr_model, savePlpData = F,
+                              savePlpResult = F, savePlpPlots =  F, 
+                              saveEvaluation = F,
                               testSplit='person', # this splits by person
                               testFraction=0.25,
                               nfold=2))
@@ -84,3 +87,17 @@ test_that("plots", {
   testthat::expect_s3_class(test, 'grob')
 
 })
+
+
+test_that("outcomeSurvivalPlot", {
+  
+  # test the plot works
+  test <- outcomeSurvivalPlot(plpData = plpData, outcomeId = 2)
+  testthat::expect_s3_class(test, 'ggsurvplot')
+  
+  testthat::expect_error(outcomeSurvivalPlot())
+  testthat::expect_error(outcomeSurvivalPlot(plpData = NULL))
+  testthat::expect_error(outcomeSurvivalPlot(outcomeId = 094954))
+})
+
+  

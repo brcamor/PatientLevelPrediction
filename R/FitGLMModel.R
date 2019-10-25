@@ -1,6 +1,6 @@
 # @file fitGLMModel.R
 #
-# Copyright 2018 Observational Health Data Sciences and Informatics
+# Copyright 2019 Observational Health Data Sciences and Informatics
 #
 # This file is part of PatientLevelPrediction
 # 
@@ -91,21 +91,25 @@ fitGLMModel <- function(population,
                                                  checkRowIds = FALSE,
                                                  normalize = NULL,
                                                  quiet = TRUE)
-    fit <- ftry({
-      flog.trace('Running Cyclops')
-      Cyclops::fitCyclopsModel(cyclopsData, prior = prior, control = control)}, finally = flog.trace('Done.'))
+    fit <- tryCatch({
+      ParallelLogger::logInfo('Running Cyclops')
+      Cyclops::fitCyclopsModel(cyclopsData, prior = prior, control = control)}, 
+      finally = ParallelLogger::logInfo('Done.'))
     if (is.character(fit)) {
       coefficients <- c(0)
        status <- fit
     } else if (fit$return_flag == "ILLCONDITIONED") {
       coefficients <- c(0)
         status <- "ILL CONDITIONED, CANNOT FIT"
+        ParallelLogger::logWarn(paste("GLM fitting issue: ", status))
     } else if (fit$return_flag == "MAX_ITERATIONS") {
       coefficients <- c(0)
        status <- "REACHED MAXIMUM NUMBER OF ITERATIONS, CANNOT FIT"
+       ParallelLogger::logWarn(paste("GLM fitting issue: ", status))
     } else {
       status <- "OK"
       coefficients <- stats::coef(fit) # not sure this is stats??
+      ParallelLogger::logInfo(paste("GLM fit status: ", status))
        }
   }
   outcomeModel <- attr(population, "metaData")
@@ -122,7 +126,7 @@ fitGLMModel <- function(population,
   }
   class(outcomeModel) <- "plpModel"
   delta <- Sys.time() - start
-  flog.trace(paste("Fitting model took", signif(delta, 3), attr(delta, "units")))
+  ParallelLogger::logInfo(paste("Fitting model took", signif(delta, 3), attr(delta, "units")))
   return(outcomeModel)
 }
 
@@ -140,7 +144,7 @@ modelTypeToCyclopsModelType <- function(modelType, stratified=F) {
   } else if (modelType == "cox") {
     return("cox")
   } else {
-    flog.error(paste("Unknown model type:", modelType))
+    ParallelLogger::logError(paste("Unknown model type:", modelType))
     stop()
   }
 

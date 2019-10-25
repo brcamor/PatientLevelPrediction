@@ -118,7 +118,6 @@ runEnsembleModel <- function(population,
   
   for (Index in seq_along(modelList)) {
     if (is.null(trainedModels)){
-      print('nope')
       results <- PatientLevelPrediction::runPlp(population,
                                                 dataList[[Index]],
                                                 modelSettings = modelList[[Index]],
@@ -176,7 +175,8 @@ runEnsembleModel <- function(population,
       return(x)
     }
     level2 <- list(ensembleStrategy = "weighted",
-                   pfunction = pfunction)
+
+    pfunction = pfunction)
     
   } else if (ensembleStrategy == "stacked") {
     nontrain_index <- which(prediction$indexes < 0)
@@ -199,10 +199,10 @@ runEnsembleModel <- function(population,
   } else {
     stop("ensembleStrategy must be mean, product, weighted and stacked")
   }
-  
+
   prediction$value <- ensem_proba
   attr(prediction, 'metaData') <- metaData
-  
+
   ParallelLogger::logInfo("Train set evaluation")
   performance.train <- evaluatePlp(prediction[prediction$indexes >= 0, ], dataList[[1]])
   ParallelLogger::logTrace("Done.")
@@ -210,8 +210,9 @@ runEnsembleModel <- function(population,
   performance.test <- evaluatePlp(prediction[prediction$indexes < 0, ], dataList[[1]])
   ParallelLogger::logTrace("Done.")
   performance <- reformatPerformance(train = performance.train, test = performance.test, analysisId)
+
   
-  
+
   endTime <- Sys.time()
   TotalExecutionElapsedTime <- endTime-ExecutionDateTime
   
@@ -302,10 +303,11 @@ applyEnsembleModel <- function(population,
   
   combinator <- ensembleModel$model$level2
   modelList <- ensembleModel$model$level1
-  
+
+
   # get prediction counts:
   peopleCount <- nrow(population)
-  
+
   pred_probas <- matrix(nrow = length(population$subjectId), ncol = 0)
   for (Index in seq_along(modelList)) {
     prob <- modelList[[Index]]$predict(plpData = dataList[[Index]], population = population)
@@ -319,13 +321,13 @@ applyEnsembleModel <- function(population,
   attr(prediction, "metaData") <- list(predictionType="binary")
   if (!"outcomeCount" %in% colnames(prediction))
     return(list(prediction = prediction))
-  
+
   if (!calculatePerformance || nrow(prediction) == 1)
     return(prediction)
-  
+
   performance <- evaluatePlp(prediction, dataList[[1]])
-  
-  
+
+
   result <- list(prediction = prediction, performanceEvaluation = performance)
   return(result)
 }
@@ -351,7 +353,6 @@ saveEnsemblePlpModel <- function(ensembleModel, dirPath) {
     savePlpModel(ensembleModel$level1[[i]], modelPath)
   }
   saveRDS(ensembleModel$level2, file.path(dirPath, "level2/combinator.rds"))
-  
 }
 
 #' loads the Ensmeble plp model and return a model list
@@ -396,7 +397,7 @@ loadEnsemblePlpModel <- function(dirPath) {
 saveEnsemblePlpResult <- function(ensembleResult, dirPath) {
   if (!file.exists(file.path(dirPath)))
     dir.create(file.path(dirPath))
-  
+
   saveRDS(ensembleResult$inputSetting, file.path(dirPath,'inputSetting.rds'))
   saveRDS(ensembleResult$executionSummary, file.path(dirPath,'executionSummary.rds'))
   saveRDS(ensembleResult$prediction, file.path(dirPath,'prediction.rds'))
@@ -405,7 +406,7 @@ saveEnsemblePlpResult <- function(ensembleResult, dirPath) {
   saveRDS(ensembleResult$analysisRef, file.path(dirPath,'analysisRef.rds'))
   
   saveEnsemblePlpModel(ensembleResult$model, file.path(dirPath,'ensemble_model'))
-  
+
 }
 
 #' loads the Ensemble plp results 

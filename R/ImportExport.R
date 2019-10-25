@@ -1,6 +1,6 @@
 # @file ImportExport.R
 #
-# Copyright 2018 Observational Health Data Sciences and Informatics
+# Copyright 2019 Observational Health Data Sciences and Informatics
 #
 # This file is part of PatientLevelPrediction
 #
@@ -114,6 +114,8 @@ transportPlp <- function(plpResult,modelName=NULL, dataName=NULL,
   plpResult$model$metaData$call$cdmDatabaseSchema <- dataName
   plpResult$model$metaData$call$cohortDatabaseSchema <- NULL
   plpResult$model$metaData$call$outcomeDatabaseSchema <- NULL
+  plpResult$model$metaData$call$oracleTempSchema <- NULL
+  plpResult$model$metaData$call$baseUrl <- NULL
   plpResult$model$metaData$modelName <- modelName
   plpResult$model$index <- NULL
   plpResult$prediction <- NULL
@@ -121,6 +123,12 @@ transportPlp <- function(plpResult,modelName=NULL, dataName=NULL,
     mod <- get("plpModel", envir = environment(plpResult$model$predict))
     mod$index <- NULL
     mod$metaData$call$connectionDetails <- NULL
+    mod$metaData$call$oracleTempSchema <- NULL
+    mod$metaData$call$outcomeDatabaseSchema <-'Missing'
+    mod$metaData$call$cdmDatabaseSchema <- 'Missing'
+    mod$metaData$call$cohortDatabaseSchema <- 'Missing'
+    mod$metaData$call$baseUrl <- NULL
+    
     assign("plpModel", mod, envir = environment(plpResult$model$predict))
   }
 
@@ -142,22 +150,31 @@ transportPlp <- function(plpResult,modelName=NULL, dataName=NULL,
     # remove less than n counts from demographicSummary
 
     if(!is.null(plpResult$performanceEvaluation$demographicSummary)){
+      
+      plpResult$performanceEvaluation$demographicSummary$PersonCountAtRisk[is.na(plpResult$performanceEvaluation$demographicSummary$PersonCountAtRisk)] <- 0
+      plpResult$performanceEvaluation$demographicSummary$PersonCountWithOutcome[is.na(plpResult$performanceEvaluation$demographicSummary$PersonCountWithOutcome)] <- 0
+      
       removeInd <- plpResult$performanceEvaluation$demographicSummary$PersonCountAtRisk< n |
-        plpResult$performanceEvaluation$demographicSummary$PersonCountWithOutcome < n |
-        plpResult$performanceEvaluation$demographicSummary$PersonCountWithNoOutcome < n
+        plpResult$performanceEvaluation$demographicSummary$PersonCountWithOutcome < n 
       plpResult$performanceEvaluation$demographicSummary$PersonCountAtRisk[removeInd] <- -1
       plpResult$performanceEvaluation$demographicSummary$PersonCountWithOutcome[removeInd] <- -1
-      plpResult$performanceEvaluation$demographicSummary$PersonCountWithNoOutcome[removeInd] <- -1
     }
     
     if(!is.null(plpResult$covariateSummary)){
-      plpResult$covariateSummary <- plpResult$covariateSummary[,colnames(plpResult$covariateSummary)%in%c('covariateId','covariateName', 'analysisId', 'conceptId','CovariateCount', 'covariateValue','CovariateCountWithOutcome','CovariateCountWithNoOutcome')]
+      plpResult$covariateSummary <- plpResult$covariateSummary[,colnames(plpResult$covariateSummary)%in%c('covariateId','covariateName', 'analysisId', 'conceptId','CovariateCount', 'covariateValue','CovariateCountWithOutcome','CovariateCountWithNoOutcome','CovariateMeanWithOutcome','CovariateMeanWithNoOutcome')]
+      
+      plpResult$covariateSummary$CovariateCount[is.na(plpResult$covariateSummary$CovariateCount)] <- 0
+      plpResult$covariateSummary$CovariateCountWithOutcome[is.na(plpResult$covariateSummary$CovariateCountWithOutcome)] <- 0
+      plpResult$covariateSummary$CovariateCountWithNoOutcome[is.na(plpResult$covariateSummary$CovariateCountWithNoOutcome)] <- 0
+      
       removeInd <- plpResult$covariateSummary$CovariateCount < n |
         plpResult$covariateSummary$CovariateCountWithOutcome < n | 
         plpResult$covariateSummary$CovariateCountWithNoOutcome < n 
       plpResult$covariateSummary$CovariateCount[removeInd] <- -1
       plpResult$covariateSummary$CovariateCountWithOutcome[removeInd] <- -1
       plpResult$covariateSummary$CovariateCountWithNoOutcome[removeInd] <- -1
+      plpResult$covariateSummary$CovariateMeanWithOutcome[removeInd] <- -1
+      plpResult$covariateSummary$CovariateMeanWithNoOutcome[removeInd] <- -1
     }
     
     }
@@ -195,13 +212,19 @@ transportModel <- function(plpModel,outputFolder){
   plpModel$metaData$call$cdmDatabaseSchema <- NULL
   plpModel$metaData$call$cohortDatabaseSchema <- NULL
   plpModel$metaData$call$outcomeDatabaseSchema <- NULL
+  plpModel$metaData$call$oracleTempSchema <- NULL
 
   # remove any sensitive data:
-  mod <- get("plpModel", envir = environment(plpModel$predict))
-  mod$index <- NULL
-  mod$metaData$call$connectionDetails <- NULL
-  assign("plpModel", mod, envir = environment(plpModel$predict))
-
+  if(!is.null(plpModel$predict)){
+    mod <- get("plpModel", envir = environment(plpModel$predict))
+    mod$index <- NULL
+    mod$metaData$call$connectionDetails <- NULL
+    mod$metaData$call$oracleTempSchema <- NULL
+    mod$metaData$call$outcomeDatabaseSchema <-'Missing'
+    mod$metaData$call$cdmDatabaseSchema <- 'Missing'
+    mod$metaData$call$cohortDatabaseSchema <- 'Missing'
+    assign("plpModel", mod, envir = environment(plpModel$predict))
+  }
 
   #save to the output location
   PatientLevelPrediction::savePlpModel(plpModel, outputFolder)
@@ -236,8 +259,10 @@ createLrSql <- function(models, modelNames, covariateConstructionName='predictio
     stop('Need to input models')
   if(!exists("modelNames"))
     stop('Need to input model names')
-  if(length(models)!=length(modelNames) & class(models)!='plpModel')
-    stop('model names not same length as models')
+  if(class(models)!='plpModel'){
+    if(length(models)!=length(modelNames))
+      stop('model names not same length as models')
+  }
   if(class(models)!='list' & class(models)!='plpModel')
     stop('wrong models class')
   if(class(modelNames)!='character')
@@ -348,9 +373,9 @@ createLrSql <- function(models, modelNames, covariateConstructionName='predictio
     covariates <- getPredictionCovariateData(connection = connection,
                                                 oracleTempSchema = oracleTempSchema,
                                                 cdmDatabaseSchema = cdmDatabaseSchema,
-                                                cohortTable = "#cohort_person",
+                                                cohortTable = cohortTable,#"#cohort_person",
                                                 cdmVersion = cdmVersion,
-                                                rowIdField = "row_id",
+                                                rowIdField = rowIdField,#"row_id",
                                                 covariateSettings = covSettings,
                                              analysisId = covariateSettings$analysisId,
                                              databaseOutput= covariateSettings$databaseOutput)
@@ -385,21 +410,6 @@ createLrSql <- function(models, modelNames, covariateConstructionName='predictio
   assign(paste0('get',covariateConstructionName,'CovariateSettings'), getCovs,envir = e)
 
   return(T)
-}
-
-
-# helper function
-sameCovs <- function(model1, model2){
-  test1 <- model1$varImp[,c('covariateId', 'covariateName')]
-  colnames(test1) <- c('covariateId', 'covariateName1')
-  test2 <- model2$varImp[,c('covariateId', 'covariateName')]
-  colnames(test2) <- c('covariateId', 'covariateName2')
-  vars <-merge(test1,test2,
-               by='covariateId')
-  if(nrow(vars)==0)
-    return(FALSE)
-
-  return(sum(vars$covariateName1==vars$covariateName2)==nrow(vars))
 }
 
 
@@ -454,18 +464,20 @@ getPredictionCovariateData <- function(connection,
 } else {
   # TO ADD TO A COHORT TABLE
   covariates <- NULL
-  sql <- " select a.subject_id, a.cohort_start_date, a.cohort_start_date as cohort_end_date,
+  sql <- " select a.@rowIdField as subject_id, a.cohort_start_date, a.cohort_start_date as cohort_end_date,
   b.covariate_id cohort_definition_id, b.covariate_value as risk
   into @databaseOutput
-  from #cohort_person a inner join
+  from @cohortTable a inner join
 
   (select #cov_temp.row_id, #model_table.model_id*1000+@analysis_id as covariate_id,
   1/(1+exp(-1.0*(max(#intercepts.intercept)+sum(#cov_temp.covariate_value*#model_table.covariate_value)))) covariate_value
   from #cov_temp inner join #model_table on #cov_temp.covariate_id=#model_table.covariate_id
   inner join #intercepts on #intercepts.model_id=#model_table.model_id
-  group by #cov_temp.row_id,  #model_table.model_id) b on a.row_id=b.row_id"
+  group by #cov_temp.row_id,  #model_table.model_id) b on a.@rowIdField=b.row_id"
 
-  sql <- SqlRender::renderSql(sql,
+  sql <- SqlRender::renderSql(sql, 
+                              rowIdField = rowIdField,
+                              cohortTable =cohortTable,
                               analysis_id = analysisId,
                               databaseOutput=databaseOutput
   )$sql
@@ -493,13 +505,15 @@ getPredictionCovariateData <- function(connection,
 #' @param asFunctions        If T then return two functions
 #' @param customCovariates   enables custome SQL to be used to create custom covariates
 #' @param e              The environment to output the covariate setting functions to
+#' @param covariateValues  boolean Whether to also download the covariates that make up the risk score
 #' @export
 #'
 createExistingModelSql <- function(modelTable, modelNames, interceptTable,
                                    covariateTable, type='logistic',
                                    analysisId=112, covariateSettings,
                                    asFunctions=F, customCovariates=NULL,
-                                   e=environment()
+                                   e=environment(),
+                                   covariateValues = F
 ){
 
   # test model inputs
@@ -525,7 +539,8 @@ createExistingModelSql <- function(modelTable, modelNames, interceptTable,
                                                   analysisId=analysisId,
                                                   covariateSettings=covariateSettings,
                                                   customCovariates = customCovariates,
-                                                  type=type)
+                                                  type=type,
+                                                  covariateValues  = covariateValues)
     attr(createExistingmodelsCovariateSettings, "fun") <- paste0('getExistingmodelsCovariateSettings')
     class(createExistingmodelsCovariateSettings) <- "covariateSettings"
     return(createExistingmodelsCovariateSettings)
@@ -557,12 +572,18 @@ createExistingModelSql <- function(modelTable, modelNames, interceptTable,
 
     # =================================
     #==================================
+    
+    if(is.null(interceptTable)){
+      interceptTable <- data.frame(modelId=unique(modelTable$modelId), 
+                                   interceptValue=rep(0, length(unique(modelTable$modelId))))
+    }
     #  INSERT THE INTERCEPTS FOR THE MODELS: MODEL_ID, INTERCEPT_VALUE
     if(class(interceptTable)=='data.frame'){
       intercepts <- interceptTable
     } else{
       intercepts <- do.call(rbind, interceptTable)
     }
+
 
     colnames(intercepts) <- SqlRender::camelCaseToSnakeCase(colnames(intercepts))
     DatabaseConnector::insertTable(connection, tableName='intercepts', data = intercepts, tempTable = T)
@@ -581,7 +602,7 @@ createExistingModelSql <- function(modelTable, modelNames, interceptTable,
     }
 
     # adding age with 0 coef to make sure everyone gets value
-    allVars <- rbind(allVars, data.frame(modelId=unique(allVars$modelId),
+    allVars <- rbind(allVars[,c('modelId','modelCovariateId','coefficientValue')], data.frame(modelId=unique(allVars$modelId),
                                          modelCovariateId=rep(-1,length(unique(allVars$modelId))),
                                          coefficientValue=rep(0,length(unique(allVars$modelId)))
     ))
@@ -627,7 +648,8 @@ createExistingModelSql <- function(modelTable, modelNames, interceptTable,
                                                  covariateSettings = covSettings,
                                                  customCovariates = covariateSettings$customCovariates,
                                                  analysisId = covariateSettings$analysisId,
-                                                 type=covariateSettings$type)
+                                                 type=covariateSettings$type,
+                                                 covariateValues = covariateSettings$covariateValues)
 
     # clean the model_table... [TODO]
     covariateRef <- data.frame(covariateId = 1000*(1:length(covariateSettings$modelNames))+covariateSettings$analysisId,
@@ -679,7 +701,8 @@ getExistingmodelsCovariateData <- function(connection,
                                            customCovariates = NULL,
                                            aggregated = FALSE,
                                            analysisId=112,
-                                           type='logistic') {
+                                           type='logistic',
+                                           covariateValues = F) {
   if (!is(covariateSettings, "covariateSettings")) {
     stop("Covariate settings object not of type covariateSettings")
   }
@@ -760,12 +783,36 @@ getExistingmodelsCovariateData <- function(connection,
   sql <- SqlRender::renderSql(sql,
                               analysis_id = analysisId
   )$sql
-  sql <- SqlRender::translateSql(sql, targetDialect =attr(connection,"dbms"))$sql
+  sql <- SqlRender::translateSql(sql, targetDialect =attr(connection,"dbms"),
+                                 oracleTempSchema = oracleTempSchema)$sql
 
   # Retrieve the covariate:
-  covariates <- DatabaseConnector::querySql.ffdf(connection, sql)
+  risks <- DatabaseConnector::querySql.ffdf(connection, sql)
   # Convert colum names to camelCase:
-  colnames(covariates) <- SqlRender::snakeCaseToCamelCase(colnames(covariates))
+  colnames(risks) <- SqlRender::snakeCaseToCamelCase(colnames(risks))
+  
+  riskCovariates <- NULL
+  if(covariateValues){
+    #extract the covariateSummary as well
+    sql <- " select #cov_temp.row_id, #model_table.model_id, #model_table.model_covariate_id as covariate_id,
+    max(#model_table.coefficient_value) as coefficient_value, max(#cov_temp.covariate_value) as covariate_value
+    from
+    #cov_temp inner join #covariate_table on #cov_temp.covariate_id=#covariate_table.covariate_id
+    inner join #model_table on #covariate_table.model_covariate_id=#model_table.model_covariate_id
+    
+    group by #cov_temp.row_id, #model_table.model_id, #model_table.model_covariate_id"
+    
+    sql <- SqlRender::renderSql(sql,
+                                analysis_id = analysisId
+    )$sql
+    sql <- SqlRender::translateSql(sql, targetDialect =attr(connection,"dbms"),
+                                   oracleTempSchema = oracleTempSchema)$sql
+    
+    # Retrieve the covariate:
+    riskCovariates <- DatabaseConnector::querySql.ffdf(connection, sql)
+    # Convert colum names to camelCase:
+    colnames(riskCovariates) <- SqlRender::snakeCaseToCamelCase(colnames(riskCovariates))
+  }
 
   # Drop temp tables
   #sql <- SqlRender::translateSql(sql = todo$sqlCleanup,
@@ -774,7 +821,8 @@ getExistingmodelsCovariateData <- function(connection,
   #DatabaseConnector::executeSql(connection, sql, progressBar = FALSE, reportOverallTime = FALSE)
 
 
-  return(covariates)
+  return(list(risks = risks,
+              covariateValues = riskCovariates))
 }
 
 

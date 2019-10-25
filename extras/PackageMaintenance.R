@@ -1,6 +1,6 @@
 # @file PackageMaintenance
 #
-# Copyright 2017 Observational Health Data Sciences and Informatics
+# Copyright 2019 Observational Health Data Sciences and Informatics
 #
 # This file is part of PatientLevelPrediction
 # 
@@ -16,6 +16,9 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# recreate the html index when new documentation
+pkgdown::build_site()
+
 # Format and check code
 OhdsiRTools::formatRFolder()
 OhdsiRTools::checkUsagePackage("PatientLevelPrediction")
@@ -28,38 +31,53 @@ system("R CMD Rd2pdf ./ --output=extras/PatientLevelPrediction.pdf")
 rmarkdown::render("vignettes/BuildingPredictiveModels.Rmd",
                   output_file = "../inst/doc/BuildingPredictiveModels.pdf",
                   rmarkdown::pdf_document(latex_engine = "pdflatex",
-                                          toc = TRUE,
+                                          toc = TRUE, toc_depth = 3,
                                           number_sections = TRUE))
 
-system("rm extras/AddingExistingModels.pdf")
-system("R CMD Rd2pdf ./ --output=extras/AddingExistingModels.pdf")
-
-rmarkdown::render("vignettes/AddingExistingModels.Rmd",
-                  output_file = "../inst/doc/AddingExistingModels.pdf",
+rmarkdown::render("vignettes/BuildingMultiplePredictiveModels.Rmd",
+                  output_file = "../inst/doc/BuildingMultiplePredictiveModels.pdf",
                   rmarkdown::pdf_document(latex_engine = "pdflatex",
                                           toc = TRUE,
                                           number_sections = TRUE))
 
-system("rm extras/CreatingNetworkstudies.pdf")
-system("R CMD Rd2pdf ./ --output=extras/CreatingNetworkstudies.pdf")
+rmarkdown::render("vignettes/ImplementingExistingModels.Rmd",
+                  output_file = "../inst/doc/ImplementingExistingModels.pdf",
+                  rmarkdown::pdf_document(latex_engine = "pdflatex",
+                                          toc = TRUE,
+                                          number_sections = TRUE))
+
 rmarkdown::render("vignettes/CreatingNetworkstudies.Rmd",
                   output_file = "../inst/doc/CreatingNetworkstudies.pdf",
                   rmarkdown::pdf_document(latex_engine = "pdflatex",
                                           toc = TRUE,
                                           number_sections = TRUE))
 
-system("rm extras/CustomPredictionAlgorithms.pdf")
-system("R CMD Rd2pdf ./ --output=extras/CustomPredictionAlgorithms.pdf")
-rmarkdown::render("vignettes/CustomPredictionAlgorithms.Rmd",
-                  output_file = "../inst/doc/CustomPredictionAlgorithms.pdf",
+rmarkdown::render("vignettes/AddingCustomAlgorithms.Rmd",
+                  output_file = "../inst/doc/AddingCustomAlgorithms.pdf",
                   rmarkdown::pdf_document(latex_engine = "pdflatex",
                                           toc = TRUE,
                                           number_sections = TRUE))
 
-system("rm extras/InstallationGuide.pdf")
-system("R CMD Rd2pdf ./ --output=extras/InstallationGuide.pdf")
 rmarkdown::render("vignettes/InstallationGuide.Rmd",
                   output_file = "../inst/doc/InstallationGuide.pdf",
+                  rmarkdown::pdf_document(latex_engine = "pdflatex",
+                                          toc = TRUE,
+                                          number_sections = TRUE))
+
+rmarkdown::render("vignettes/BuildingEnsembleModels.Rmd",
+                  output_file = "../inst/doc/BuildingEnsembleModels.pdf",
+                  rmarkdown::pdf_document(latex_engine = "pdflatex",
+                                          toc = TRUE,
+                                          number_sections = TRUE))
+
+rmarkdown::render("vignettes/BuildingDeepLearningModels.Rmd",
+                  output_file = "../inst/doc/BuildingDeepLearningModels.pdf",
+                  rmarkdown::pdf_document(latex_engine = "pdflatex",
+                                          toc = TRUE,
+                                          number_sections = TRUE))
+
+rmarkdown::render("vignettes/GeneratingLearningCurves.Rmd",
+                  output_file = "../inst/doc/GeneratingLearningCurves.pdf",
                   rmarkdown::pdf_document(latex_engine = "pdflatex",
                                           toc = TRUE,
                                           number_sections = TRUE))
