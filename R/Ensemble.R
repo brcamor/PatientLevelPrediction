@@ -136,6 +136,7 @@ runEnsembleModel <- function(population,
       results <- trainedModels[Index]  
       print('yep')
     }
+
     
     metaData <- attr(results$prediction, 'metaData')
     level1[[Index]] <- results$model
@@ -143,7 +144,7 @@ runEnsembleModel <- function(population,
     ##trainAUCs <- c(trainAUCs, as.numeric(results$performanceEvaluation$evaluationStatistics[3, 4]))
     tempres <- as.data.frame(results$performanceEvaluation$evaluationStatistics)
     trainAUCs <- c(trainAUCs, as.numeric(as.character(tempres$Value[tempres$Metric=='AUC.auc' & tempres$Eval=='train']))) # overfitting?!
-    
+
     cnames <- c('rowId','value')
     if(!'indexes'%in%colnames(prediction)){
       cnames <- c('rowId','indexes','value')
@@ -153,7 +154,7 @@ runEnsembleModel <- function(population,
   }
   names(level1) <- paste0('model_',1:length(level1))
   pred_probas <- prediction[,grep('value_',colnames(prediction))] #
-  
+
   if (ensembleStrategy == "mean") {
     ensem_proba <- rowMeans(pred_probas)
     level2 <- list(ensembleStrategy = "mean",
