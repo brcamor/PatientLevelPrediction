@@ -678,6 +678,9 @@ createLearningCurvePar <- function(population,
     prediction <-
       model$predict(plpData = plpData, population = population[ind,])
     
+    nCoeff <- sum(abs(model$model$coefficients) > 0)
+    nCoeff0_01 <- sum(abs(model$model$coefficients) > 0.01)
+    
     metaData <- list(
       predictionType = "binary",
       cohortId = attr(population, 'metaData')$cohortId,
@@ -725,7 +728,9 @@ createLearningCurvePar <- function(population,
         trainCalibrationIntercept = performance.train$evaluationStatistics$CalibrationIntercept,
         testCalibrationIntercept = performance.test$evaluationStatistics$CalibrationIntercept,
         trainCalibrationSlope = performance.train$evaluationStatistics$CalibrationSlope,
-        testCalibrationSlope = performance.test$evaluationStatistics$CalibrationSlope
+        testCalibrationSlope = performance.test$evaluationStatistics$CalibrationSlope,
+        nCoeff = nCoeff,
+        nCoeff0_01 = nCoeff0_01
       )
     )
 
@@ -746,7 +751,9 @@ createLearningCurvePar <- function(population,
     "trainCalibrationIntercept",
     "testCalibrationIntercept",
     "trainCalibrationSlope",
-    "testCalibrationSlope"
+    "testCalibrationSlope",
+    "nCoeff",
+    "nCoeff0_01"
   )
   
   endTime <- Sys.time()

@@ -1129,7 +1129,7 @@ plotLearningCurve <- function(learningCurve,
                                "TrainBrierScaled", "TestBrierScaled",
                                "TrainCalibrationIntercept",
                                "TestCalibrationIntercept",
-                               "TrainCalibrationSlope", "TestCalibrationSlope")
+                               "TrainCalibrationSlope", "TestCalibrationSlope", "nCoeff", "nCoeff0_01")
   tidyLearningCurve <- NULL
   yAxisRsnge <- NULL
   y <- NULL
